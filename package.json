@@ -1,0 +1,12 @@
+{
+  "name": "snooker-sim",
+  "version": "0.10c",
+  "description": "Event-driven 2D snooker physics — faithful two-phase (slide→roll) ball motion with cue spin, built on the carrom-js analytic engine. Pure ES6, no dependencies.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "serve": "node serve.js",
+    "tune": "node tools/tune.mjs"
+  },
+  "license": "MIT"
+}

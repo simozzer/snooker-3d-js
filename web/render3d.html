@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>snooker-js — 3D replay</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: #12161b; color: #e8e8e8; }
+      #app { display: flex; height: 100vh; }
+      #view { flex: 1; position: relative; min-width: 0; }
+      #view canvas { display: block; width: 100%; height: 100%; }
+      #panel { width: 280px; padding: 16px; background: #1b2229; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+      h1 { font-size: 15px; margin: 0 0 4px; color: #9fb4c7; letter-spacing: 0.5px; }
+      .ctl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+      .ctl label { display: flex; justify-content: space-between; color: #a8b6c4; }
+      .ctl input[type="range"] { width: 100%; }
+      button { padding: 9px 12px; font-size: 14px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; background: #2e7d5b; color: #fff; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button.sec { background: #33404c; }
+      button.nudge { padding: 4px 0; font-size: 13px; background: #33404c; min-width: 30px; flex: 0 0 auto; }
+      label.chk { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #a8b6c4; cursor: pointer; }
+      label.chk input { cursor: pointer; }
+      .aimrow { display: flex; gap: 6px; align-items: center; }
+      .aimrow input[type="range"] { flex: 1; min-width: 0; }
+      #status { font-size: 12px; color: #8fa3b5; min-height: 32px; line-height: 1.4; }
+      .hint { font-size: 11px; color: #6f8496; }
+      /* cinematic REPLAY overlay: letterbox bars + a pulsing badge, shown only during a pot replay */
+      #replayband { position: absolute; inset: 0; pointer-events: none; display: none; z-index: 3; }
+      #replayband.on { display: block; }
+      #replayband .lb { position: absolute; left: 0; right: 0; height: 8%; background: #000; }
+      #replayband .lb.top { top: 0; }
+      #replayband .lb.bottom { bottom: 0; }
+      #replayband .badge { position: absolute; top: calc(8% + 16px); left: 24px; display: flex; align-items: center; gap: 9px;
+        font-weight: 800; letter-spacing: 2px; font-size: 15px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+      #replayband .dot { width: 12px; height: 12px; border-radius: 50%; background: #e23b3b; box-shadow: 0 0 10px #e23b3b;
+        animation: replaypulse 1s ease-in-out infinite; }
+      #replayband .sub { position: absolute; bottom: calc(8% + 12px); left: 24px; font-size: 11px; letter-spacing: 1px;
+        color: #cbd6e0; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+      @keyframes replaypulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="view">
+        <div id="replayband">
+          <div class="lb top"></div>
+          <div class="lb bottom"></div>
+          <div class="badge"><span class="dot"></span>REPLAY</div>
+          <div class="sub">press any key to skip</div>
+        </div>
+      </div>
+      <div id="panel">
+        <div>
+          <h1>SNOOKER · 3D · vs AI</h1>
+          <div class="hint">Deterministic engine decides &amp; resolves; this only draws. Physics untouched.</div>
+        </div>
+        <div id="scores" style="font-size:14px;font-weight:600;color:#cfe0ee;"></div>
+        <div class="ctl"><label>Game</label>
+          <select id="game">
+            <option value="snooker" selected>Snooker</option>
+            <option value="pool">8-Ball Pool</option>
+            <option value="nineball">9-Ball Pool</option>
+          </select>
+        </div>
+        <div class="ctl"><label>Opponent</label>
+          <select id="aimode">
+            <option value="ai" selected>You vs AI</option>
+            <option value="human">Two players (hot-seat)</option>
+            <option value="self">Watch AI vs AI</option>
+          </select>
+        </div>
+        <div class="ctl"><label>AI difficulty</label>
+          <select id="difficulty"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option><option value="deadly">Deadly</option></select>
+        </div>
+        <div class="ctl"><label>Aim<span id="v-angle"></span></label>
+          <div class="aimrow">
+            <button id="angleL" class="nudge" title="nudge aim left (← key)">◀</button>
+            <input id="angle" type="range" min="0" max="360" step="0.5" value="90" />
+            <button id="angleR" class="nudge" title="nudge aim right (→ key)">▶</button>
+          </div>
+          <div class="hint">Click the table to aim · ◀ ▶ or ← → to fine-tune.</div>
+        </div>
+        <div class="ctl"><label>Power<span id="v-power"></span></label><input id="power" type="range" min="0.5" max="8" step="0.1" value="3" /></div>
+        <div class="ctl"><label>Cue ball<span id="v-spin"></span></label>
+          <canvas id="spinpad" width="132" height="132" style="align-self:center; touch-action:none; cursor:pointer; margin-top:2px;"></canvas>
+          <div class="hint" style="text-align:center;">Inner ball: drag for side / follow-draw · Outer ring: drag for cue lift (jump)</div>
+        </div>
+        <div class="ctl"><label>Trajectories</label>
+          <select id="trajectory">
+            <option value="none">None</option>
+            <option value="immediate">To first contact</option>
+            <option value="full" selected>Full path</option>
+          </select>
+        </div>
+        <button id="play">▶ Play your shot</button>
+        <button id="newframe" class="sec">New frame</button>
+        <label class="chk"><input type="checkbox" id="sound" checked /> Sound</label>
+        <label class="chk"><input type="checkbox" id="replays" checked /> Pot replays (press any key to skip)</label>
+        <div id="status"></div>
+        <div class="hint">Set aim / power / spin, then Play your shot; the AI replies automatically. Drag to orbit · scroll to zoom. A ball that leaps the cushion leaves play; an aligned pot drops.</div>
+      </div>
+    </div>
+    <script type="importmap">
+      { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+    <script type="module" src="./render3d.js"></script>
+  </body>
+</html>

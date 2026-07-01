@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>snooker-js</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #1c2229;
+        color: #e8e8e8;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 12px;
+      }
+      h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: 0.5px; color: #9fb4c7; }
+      #scoreboard {
+        display: flex;
+        gap: 18px;
+        align-items: center;
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .pl { padding: 4px 12px; border-radius: 8px; background: #2a323b; }
+      .pl.active { outline: 2px solid #7fc97f; }
+      #ballon { font-size: 13px; color: #cdd6df; }
+      #ballon b { text-transform: capitalize; }
+      #msg { font-size: 13px; color: #f0d27a; min-height: 18px; }
+      canvas { background: #0d3b24; border-radius: 6px; touch-action: none; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
+      #controls { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; justify-content: center; }
+      .ctl { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #aab6c2; align-items: center; }
+      input[type=range] { width: 140px; }
+      #fire { font-size: 15px; font-weight: 700; padding: 8px 22px; border: 0; border-radius: 8px; background: #2e8b57; color: #fff; cursor: pointer; }
+      #fire:disabled { background: #3a4049; color: #888; cursor: default; }
+      #fire.firing { background: #2e8b57 !important; color: #fff !important; box-shadow: 0 0 0 3px #7fc97f; }
+      .nudge { font-size: 15px; font-weight: 700; padding: 7px 12px; border: 0; border-radius: 7px; background: #3a4651; color: #e8e8e8; cursor: pointer; user-select: none; touch-action: none; }
+      .nudge:active { background: #5a6a78; }
+      .nudge:disabled { opacity: 0.4; cursor: default; }
+      label.chk { display: flex; gap: 5px; align-items: center; font-size: 12px; color: #cdd6df; }
+      #spinpad { background: #2a323b; border-radius: 50%; cursor: crosshair; }
+      .hint { font-size: 12px; color: #8b97a3; max-width: 980px; text-align: center; }
+      #help { width: 100%; max-width: 1008px; display: flex; flex-direction: column; gap: 8px; }
+      details { background: #2a323b; border-radius: 8px; padding: 4px 12px; }
+      details summary { cursor: pointer; font-weight: 600; font-size: 13px; color: #9fb4c7; padding: 6px 0; user-select: none; }
+      details ul { margin: 4px 0 10px; padding-left: 20px; }
+      details li { font-size: 13px; color: #cdd6df; margin: 4px 0; line-height: 1.45; }
+
+      /* animated aurora-blob background — soft edges baked into radial
+         gradients (no runtime blur / blend-mode) so only a cheap GPU
+         transform animates, keeping GPU/compositor cost minimal */
+      .bg-aurora {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        overflow: hidden;
+        background: #1c2229;
+      }
+      .bg-aurora .blob {
+        position: absolute;
+        width: 60vmax;
+        height: 60vmax;
+        border-radius: 50%;
+        will-change: transform;
+      }
+      .blob-1 { background: radial-gradient(circle at center, rgba(46,139,87,0.40), rgba(46,139,87,0) 70%); top: -18%; left: -14%; animation: drift-1 30s ease-in-out infinite; }
+      .blob-2 { background: radial-gradient(circle at center, rgba(14,116,144,0.38), rgba(14,116,144,0) 70%); top: 26%;  left: 48%;  animation: drift-2 36s ease-in-out infinite; }
+      .blob-3 { background: radial-gradient(circle at center, rgba(200,146,58,0.30), rgba(200,146,58,0) 70%); top: 52%;  left: -2%;  animation: drift-3 42s ease-in-out infinite; }
+      @keyframes drift-1 { 50% { transform: translate(30vw, 20vh) scale(1.2); } }
+      @keyframes drift-2 { 50% { transform: translate(-25vw, 15vh) scale(0.9); } }
+      @keyframes drift-3 { 50% { transform: translate(20vw, -20vh) scale(1.15); } }
+      @media (prefers-reduced-motion: reduce) {
+        .bg-aurora .blob { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bg-aurora" aria-hidden="true">
+      <span class="blob blob-1"></span>
+      <span class="blob blob-2"></span>
+      <span class="blob blob-3"></span>
+    </div>
+    <h1 id="title">SNOOKER · v0.10c · event-driven two-phase physics</h1>
+    <div id="scoreboard">
+      <div class="pl" id="pl0">You <span id="s0">0</span></div>
+      <div id="ballon"><b id="on"></b></div>
+      <div class="pl" id="pl1"><span id="p1name">Computer</span> <span id="s1">0</span></div>
+    </div>
+    <div id="msg"></div>
+    <canvas id="table"></canvas>
+    <div id="controls">
+      <div class="ctl">power <input id="power" type="range" min="0.4" max="8" step="0.1" value="3" /><span id="pwrval">3.0</span></div>
+      <div class="ctl">
+        spin (tip)
+        <canvas id="spinpad" width="64" height="64"></canvas>
+      </div>
+      <div class="ctl">
+        fine angle
+        <div style="display:flex; gap:5px;">
+          <button class="nudge" id="angleL" title="rotate aim left (← key)">◀</button>
+          <button class="nudge" id="angleR" title="rotate aim right (→ key)">▶</button>
+        </div>
+      </div>
+      <button id="fire">Fire</button>
+      <button class="nudge" id="reset" title="reset power to 1.0 and spin to zero">Reset</button>
+      <div class="ctl">
+        game
+        <select id="game">
+          <option value="snooker" selected>Snooker</option>
+          <option value="doublesnooker">Double Snooker (30 reds)</option>
+          <option value="pool">8-Ball Pool</option>
+          <option value="nineball">9-Ball Pool</option>
+          <option value="billiards">Billiards</option>
+        </select>
+      </div>
+      <div class="ctl">
+        trajectories
+        <select id="trajectory">
+          <option value="none">None</option>
+          <option value="immediate">Immediate</option>
+          <option value="full" selected>Full</option>
+        </select>
+      </div>
+      <div class="ctl">
+        difficulty
+        <select id="difficulty">
+          <option value="deadly">Deadly</option>
+          <option value="perfect">Perfect</option>
+          <option value="hard">Hard</option>
+          <option value="medium" selected>Medium</option>
+          <option value="easy">Easy</option>
+          <option value="beginner">Beginner</option>
+        </select>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label class="chk"><input type="checkbox" id="ai" checked /> Player 2 = Computer</label>
+        <label class="chk"><input type="checkbox" id="selfplay" /> Self-play</label>
+        <label class="chk"><input type="checkbox" id="sound" checked /> Sound</label>
+      </div>
+    </div>
+    <div class="hint" id="hint">Drag on the table to aim. Set power and cue-tip spin (drag the dot: up = follow, down = draw, sideways = side). Fire.</div>
+    <div id="help">
+      <details id="howto-box"><summary>How to play</summary><ul id="howto-list"></ul></details>
+      <details id="rules-box"><summary>Rules</summary><ul id="rules-list"></ul></details>
+    </div>
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

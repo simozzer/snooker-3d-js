@@ -701,8 +701,9 @@ function playShot(shot) {
 
 // --- pot replays -----------------------------------------------------------------------------
 // After a successful pot, re-play the SAME shot timeline once with a scripted, randomly-chosen camera
-// (top-down / follow cue / chase the potted ball into its pocket / track the action), smoothly damped.
-// Any key skips it. Physics untouched — this just re-runs the interpolation with the camera driven.
+// (one of four static framings, or — very infrequently — a swivel that chases a ball and orbits it),
+// smoothly damped. Any key skips it. Physics untouched — this just re-runs the interpolation with the
+// camera driven.
 let replaying = false;
 let replayInfo = null;
 let pauseUntil = 0; // frame-clock time to hold before the next transition (pre-replay beat / post-replay hold)
@@ -717,20 +718,28 @@ function pottedObjectBalls(tl) {
   return last.balls.filter((b) => b.pocketed && !b.cleared && b.id !== 'cue').map((b) => b.id);
 }
 
-// Everything the replay must KEEP IN FRAME: the cue's starting position (so you see the shot) and every
-// potted ball's drop point. Also returns the drop TIMES to slow-mo the key moment and cut just after it.
+// Everything the replay must KEEP IN FRAME: the cue's starting position (so you see the shot), every
+// collision point (ball-ball, cushion, jaw), every potted ball's drop point, and every ball's final
+// resting spot. The framing centre/radius are sized to enclose them all, so the camera never crops the
+// action. Also returns the drop TIMES to slow-mo the key moment and cut just after it.
 function replayFraming() {
   const pts = [];
   const start = replayState(timeline, planCache, 0);
   const cue = start.get('cue');
   if (cue) pts.push(P3(cue.pos.x, cue.pos.y, R));
   const dropTs = [];
+  const ballPt = (ev, id) => { const b = ev.balls.find((x) => x.id === id); if (b) pts.push(P3(b.pos.x, b.pos.y, R)); };
   for (const ev of timeline) {
-    if (ev.kind !== 'pocket' || !ev.hit || !lastPots.includes(ev.hit.id)) continue;
-    dropTs.push(ev.t);
-    const b = ev.balls.find((x) => x.id === ev.hit.id);
-    if (b) pts.push(P3(b.pos.x, b.pos.y, R)); // where it dropped
+    if (ev.kind === 'pocket' && ev.hit && lastPots.includes(ev.hit.id)) {
+      dropTs.push(ev.t);
+      ballPt(ev, ev.hit.id); // where a tracked ball dropped
+    } else if ((ev.kind === 'pair' || ev.kind === 'rail' || ev.kind === 'jaw') && ev.hit) {
+      // keep the point of contact in view (hit = {a,b} for a pair, {id} for a cushion/jaw)
+      for (const id of [ev.hit.a, ev.hit.b, ev.hit.id]) if (id) ballPt(ev, id);
+    }
   }
+  const last = timeline[timeline.length - 1]; // final resting positions of every ball still on the table
+  if (last) for (const b of last.balls) if (!b.pocketed) pts.push(P3(b.pos.x, b.pos.y, R));
   const center = new THREE.Vector3();
   for (const p of pts) center.add(p);
   center.multiplyScalar(1 / Math.max(1, pts.length));
@@ -752,15 +761,21 @@ function replayAngleDir(name) {
   return d.normalize();
 }
 
+const SWIVEL_CHANCE = 0.1; // very infrequently, follow the cue ball and swivel around it instead of the static frame
 function startReplay() {
   replaying = true;
   const f = replayFraming();
   const angle = REPLAY_ANGLES[Math.floor(Math.random() * REPLAY_ANGLES.length)];
+  const swivel = Math.random() < SWIVEL_CHANCE; // rare cinematic: orbit a moving ball
   replayInfo = {
     center: f.center,
     radius: f.radius,
     dir: replayAngleDir(angle),
     orbit: (Math.random() < 0.5 ? 1 : -1) * 0.28, // radians of gentle orbit across the replay, for life
+    swivel,
+    followId: lastPots[0] ?? 'cue', // chase the first potted ball if any, else the cue ball
+    swivelDir: Math.random() < 0.5 ? 1 : -1, // orbit clockwise / anticlockwise
+    swivelBase: Math.random() * Math.PI * 2, // random starting azimuth so it's not always the same view
     potT: f.first, // slow-mo hardest around the first drop
     end: Math.min(endT, f.last + 0.9), // cut ~0.9 s after the last pot
     camPos: new THREE.Vector3(),
@@ -828,6 +843,7 @@ const HALF_TAN = Math.tan(((45 * Math.PI) / 180) / 2); // camera vertical half-F
 function driveReplayCamera(state, dt) {
   const rm = replayInfo;
   const p = Math.min(1, simT / rm.end); // replay progress 0→1
+  if (rm.swivel) { driveSwivelCamera(state, dt, p); return; }
   const fit = (rm.radius / HALF_TAN) * 1.25 + rm.radius; // distance that frames `radius` with margin
   const dist = fit * (1.32 - 0.3 * p); // slow push-in over the replay
   const ang = rm.orbit * p; // gentle orbit
@@ -840,6 +856,34 @@ function driveReplayCamera(state, dt) {
   if (!rm.init) { rm.camPos.copy(dPos); rm.camTgt.copy(dTgt); rm.init = true; }
   else {
     const kP = 1 - Math.exp(-dt / 0.3); // exponential damping (frame-rate independent)
+    const kT = 1 - Math.exp(-dt / 0.2);
+    rm.camPos.lerp(dPos, kP);
+    rm.camTgt.lerp(dTgt, kT);
+  }
+  camera.position.copy(rm.camPos);
+  camera.lookAt(rm.camTgt);
+}
+
+// The rare swivel treatment: sweep a big arc around the vertical axis through the action while the look
+// pans toward the ball we're chasing — dynamic angle changes, but always orbiting at the framing distance
+// so every collision and final position stays in view (never the tight crop of a true follow-cam). The
+// azimuth is driven by replay progress `p` (warped by replayRate), so it slows around the pot.
+const SWIVEL_EH = 0.87, SWIVEL_EV = 0.5; // cos/sin of the ~30° orbit elevation
+function driveSwivelCamera(state, dt, p) {
+  const rm = replayInfo;
+  const fit = (rm.radius / HALF_TAN) * 1.5 + rm.radius; // wider margin than the static frame: the look is off-centre
+  const f = state.get(rm.followId);
+  const ball = f ? P3(f.pos.x, f.pos.y, f.pos.z) : rm.center.clone();
+  const dTgt = rm.center.clone().lerp(ball, 0.35); // bias the look toward the chased ball, but keep the action framed
+  const az = rm.swivelBase + rm.swivelDir * p * Math.PI * 1.7; // most of a full turn across the whole replay
+  const dPos = new THREE.Vector3(
+    rm.center.x + Math.cos(az) * fit * SWIVEL_EH,
+    fit * SWIVEL_EV, // elevated above the table
+    rm.center.z + Math.sin(az) * fit * SWIVEL_EH,
+  );
+  if (!rm.init) { rm.camPos.copy(dPos); rm.camTgt.copy(dTgt); rm.init = true; }
+  else {
+    const kP = 1 - Math.exp(-dt / 0.3);
     const kT = 1 - Math.exp(-dt / 0.2);
     rm.camPos.lerp(dPos, kP);
     rm.camTgt.lerp(dTgt, kT);

@@ -19,6 +19,7 @@ import { snooker } from '../src/variants/snooker.js';
 import { pool } from '../src/variants/pool.js';
 import { nineball } from '../src/variants/nineball.js';
 import { aiTurn, chooseShotFinish, difficultyConfig, executeShot } from '../src/ai.js';
+import { build147 } from '../src/exhibition.js';
 import { buildPlanCache, replayState } from './replay.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
@@ -84,12 +85,22 @@ const cloth = new THREE.MeshStandardMaterial({ color: 0x1f7a4d, roughness: 0.9 }
 const railMat = new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.7 });
 const jawMat = new THREE.MeshStandardMaterial({ color: 0x3a2817, roughness: 0.6 });
 const pocketMat = new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 });
+const netMat = new THREE.LineBasicMaterial({ color: 0x9a9a86, transparent: true, opacity: 0.72 });
+// pocket mouth: a clean, faintly luminescent disc (unlit, so it reads as softly self-lit) over the
+// green — a round glow rather than a black hole. depthWrite off so the net + resting balls show through.
+const mouthMat = new THREE.MeshBasicMaterial({ color: 0x3a5f6e, transparent: true, opacity: 0.5, depthWrite: false });
+const markMat = new THREE.LineBasicMaterial({ color: 0xdfeae0, transparent: true, opacity: 0.5 });
+const spotMat = new THREE.MeshBasicMaterial({ color: 0xdfeae0, transparent: true, opacity: 0.65 });
+const brassMat = new THREE.MeshStandardMaterial({ color: 0xb5893a, metalness: 0.85, roughness: 0.34 });
 
 function buildTable() {
   const g = new THREE.Group();
-  // bed (a thin slab; its top surface is z=0 in physics, ball centre rides at z=R above it)
-  const bed = new THREE.Mesh(new THREE.BoxGeometry(TABLE_W() * S, 0.02 * S, TABLE_H() * S), cloth);
-  bed.position.set(0, -0.01 * S, 0);
+  // bed: a thin slab whose OUTLINE is bitten inward at each pocket (a semicircle on the rails, a
+  // quarter arc at each corner), so the pocket mouths are real openings cut through the cloth — the
+  // green stops at the mouth circle instead of showing under it. Pockets sit on the boundary, so this
+  // notched-outline (not boundary-crossing holes) triangulates cleanly with no leak past the border.
+  const bed = new THREE.Mesh(new THREE.ExtrudeGeometry(bedShape(), { depth: 0.02 * S, bevelEnabled: false }), cloth);
+  bed.rotation.x = Math.PI / 2; // shape (x,y) → world (x,z); top surface at y=0, slab extends down
   bed.receiveShadow = true;
   g.add(bed);
 
@@ -120,18 +131,126 @@ function buildTable() {
     g.add(t);
   }
 
-  // pocket mouths: dark discs sunk at each pocket, radius = mouth (the visible opening).
+  // each pocket: a dark floor deep in the bag (so the recess reads from any angle) and a baggy string
+  // net hung from the mouth. The mouth itself is the real hole in the bed, so the net shows from above.
+  pocketNets = [];
   for (const p of variant.pockets()) {
-    const disc = new THREE.Mesh(new THREE.CircleGeometry((p.mouth ?? p.radius) * S, 24), pocketMat);
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.copy(P3(p.center.x, p.center.y, 0.001));
-    g.add(disc);
+    const mouthR = p.mouth ?? p.radius;
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(mouthR * 1.2 * S, 24), pocketMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.copy(P3(p.center.x, p.center.y, -NET_DEPTH - 0.01));
+    g.add(floor);
+    const net = buildNet(mouthR); // pivots at the rim, so it swings when a ball drops in
+    net.position.copy(P3(p.center.x, p.center.y, 0));
+    g.add(net);
+    // translucent circular mouth: makes the pocket read as a round hole (vs green cloth) without hiding the net
+    const mouth = new THREE.Mesh(new THREE.CircleGeometry(mouthR * S, 28), mouthMat);
+    mouth.rotation.x = -Math.PI / 2;
+    mouth.position.copy(P3(p.center.x, p.center.y, 0.002));
+    mouth.renderOrder = 1;
+    g.add(mouth);
+    // a brass plate ringing each pocket, sat on the rail tops — a wide arc whose gap faces into the
+    // table (where the ball enters) so it hugs the rails around the back and sides of the mouth
+    const isCorner = Math.abs(p.center.x) > 1e-6 && Math.abs(p.center.y) > 1e-6;
+    const arcLen = isCorner ? Math.PI * 0.6 : Math.PI * 0.82; // corner: a short cap whose ends run along the two rails
+    const arc = new THREE.Mesh(new THREE.TorusGeometry(mouthR * 1.02 * S, 0.013 * S, 10, 30, arcLen), brassMat);
+    arc.rotation.x = Math.PI / 2; // flat; local angle θ → world (cosθ, sinθ) in the X–Z plane
+    arc.castShadow = true;
+    const bracket = new THREE.Group();
+    bracket.add(arc);
+    bracket.position.copy(P3(p.center.x, p.center.y, topZ * 0.9));
+    bracket.rotation.y = arcLen / 2 - Math.atan2(p.center.y, p.center.x); // centre the arc outward, gap facing the table
+    g.add(bracket);
+    pocketNets.push({ cx: p.center.x, cy: p.center.y, grp: net, jig: null });
+  }
+
+  // painted cloth markings (baulk line / D / spots for snooker; head string + spots for pool & 9-ball),
+  // laid just above the bed. Each variant owns its own geometry via markings().
+  if (variant.markings) {
+    const mk = variant.markings();
+    const MY = 0.004; // sit just above the bed to avoid z-fighting
+    const polyline = (ptsPhys) => g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ptsPhys.map((p) => P3(p.x, p.y, MY))), markMat));
+    for (const seg of mk.lines ?? []) polyline(seg);
+    for (const arc of mk.arcs ?? []) {
+      const pts = [];
+      for (let i = 0; i <= 40; i++) { const a = arc.a0 + (arc.a1 - arc.a0) * (i / 40); pts.push({ x: arc.cx + Math.cos(a) * arc.r, y: arc.cy + Math.sin(a) * arc.r }); }
+      polyline(pts);
+    }
+    for (const sp of mk.spots ?? []) {
+      const dot = new THREE.Mesh(new THREE.CircleGeometry(0.011 * S, 14), spotMat);
+      dot.rotation.x = -Math.PI / 2;
+      dot.position.copy(P3(sp.x, sp.y, MY));
+      g.add(dot);
+    }
   }
   return g;
 }
+// A small string basket: strands from the mouth ring taper to a narrow bottom. Local origin at the
+// mouth (world y=0) so it swings when a ball drops in.
+const NET_DEPTH = 0.12; // bag depth (m)
+function buildNet(mouthR) {
+  const N = 14;
+  const D = NET_DEPTH;
+  const rings = [{ y: -0.004, r: mouthR * 0.96 }, { y: -D * 0.4, r: mouthR * 0.8 }, { y: -D * 0.72, r: mouthR * 0.55 }, { y: -D, r: mouthR * 0.32 }];
+  const node = (ri, i) => { const a = (i / N) * Math.PI * 2; return new THREE.Vector3(Math.cos(a) * rings[ri].r * S, rings[ri].y * S, Math.sin(a) * rings[ri].r * S); };
+  const pts = [];
+  for (let i = 0; i < N; i++) for (let ri = 0; ri < rings.length - 1; ri++) pts.push(node(ri, i), node(ri + 1, i)); // strands
+  for (let ri = 1; ri < rings.length; ri++) for (let i = 0; i < N; i++) pts.push(node(ri, i), node(ri, (i + 1) % N)); // hoops
+  return new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), netMat);
+}
 const TABLE_W = () => B.maxX - B.minX;
 const TABLE_H = () => B.maxY - B.minY;
+
+// The table bed outline (scene units) with each pocket mouth bitten inward — a simple closed polygon
+// (no holes), so the openings cut cleanly through the slab. Walks the perimeter counterclockwise,
+// arcing into the table around each pocket centre by its mouth radius; every arc bulges inward.
+function bedShape() {
+  const pk = variant.pockets();
+  const rAt = (x, y) => { const p = pk.find((q) => Math.abs(q.center.x - x) < 1e-6 && Math.abs(q.center.y - y) < 1e-6); return (p.mouth ?? p.radius) * S; };
+  const [cbl, cbr, ctr, ctl, mb, mt] = [rAt(-HX, -HY), rAt(HX, -HY), rAt(HX, HY), rAt(-HX, HY), rAt(0, -HY), rAt(0, HY)];
+  const x = HX * S;
+  const y = HY * S;
+  const P = Math.PI;
+  const sh = new THREE.Shape();
+  sh.moveTo(-x + cbl, -y);
+  sh.lineTo(-mb, -y);
+  sh.absarc(0, -y, mb, P, 0, true); // bottom-middle
+  sh.lineTo(x - cbr, -y);
+  sh.absarc(x, -y, cbr, P, P / 2, true); // bottom-right corner
+  sh.lineTo(x, y - ctr);
+  sh.absarc(x, y, ctr, (3 * P) / 2, P, true); // top-right corner
+  sh.lineTo(mt, y);
+  sh.absarc(0, y, mt, 0, -P, true); // top-middle
+  sh.lineTo(-x + ctl, y);
+  sh.absarc(-x, y, ctl, 0, -P / 2, true); // top-left corner
+  sh.lineTo(-x, -y + cbl);
+  sh.absarc(-x, -y, cbl, P / 2, 0, true); // bottom-left corner
+  sh.closePath();
+  return sh;
+}
+let pocketNets = []; // [{ cx, cy, grp, jig }] — string baskets that swing when a ball drops in
 let tableGroup = null;
+
+// A ball has just dropped into the pocket nearest (cx,cy) moving at (vx,vy): swing that net like a
+// pendulum in the ball's direction, decaying over ~1.5 s. Amplitude scales with the drop speed.
+function kickNet(cx, cy, vx, vy, speed) {
+  let best = null;
+  let bd = Infinity;
+  for (const n of pocketNets) { const d = Math.hypot(n.cx - cx, n.cy - cy); if (d < bd) { bd = d; best = n; } }
+  if (!best) return;
+  const dir = new THREE.Vector3(vx, 0, vy);
+  if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+  const axis = new THREE.Vector3(0, 1, 0).cross(dir.normalize()).normalize(); // horizontal, ⟂ to impact
+  best.jig = { t0: performance.now(), amp: Math.min(0.5, speed * 0.09), axis };
+}
+function updateNets(now) {
+  for (const n of pocketNets) {
+    if (!n.jig) continue;
+    const e = (now - n.jig.t0) / 1000;
+    if (e > 1.5) { n.grp.quaternion.identity(); n.jig = null; continue; }
+    n.grp.quaternion.setFromAxisAngle(n.jig.axis, n.jig.amp * Math.exp(-4 * e) * Math.cos(14 * e)); // damped swing
+  }
+}
 function rebuildTable() {
   if (tableGroup) { scene.remove(tableGroup); tableGroup.traverse((o) => o.geometry?.dispose?.()); }
   tableGroup = buildTable();
@@ -173,6 +292,21 @@ function numberSprite(text) {
   return spr;
 }
 let ballMeshes = new Map(); // id → { grp, spinner }
+
+// The cue stick — shown only while a live shot is being cued (behind the cue ball, striking down the
+// aim line). Local +Y runs butt→tip so we can aim it by rotating +Y onto the shot direction.
+const CUE_LEN = 1.45; // m
+const cueStick = new THREE.Group();
+{
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.006 * S, 0.014 * S, CUE_LEN * S, 16), new THREE.MeshStandardMaterial({ color: 0xc79a5b, roughness: 0.5 }));
+  shaft.castShadow = true;
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.006 * S, 0.006 * S, 0.03 * S, 12), new THREE.MeshStandardMaterial({ color: 0x1f5fa8, roughness: 0.6 }));
+  tip.position.y = (CUE_LEN * S) / 2;
+  cueStick.add(shaft, tip);
+}
+cueStick.visible = false;
+scene.add(cueStick);
+
 function makeBallMesh(piece) {
   const grp = new THREE.Group(); // outer: positioned only
   const spinner = new THREE.Group(); // inner: rotates to show spin
@@ -226,13 +360,34 @@ let endT = 0;
 
 // accumulate a rolling orientation per ball from spin so the surface spot visibly turns
 const orient = new Map();
+const BAG_SLOTS = [[0, 0], [1.05, 0.2], [0.5, 1.0]]; // up to 3 resting spots (in ball-radius units) in a bag
 function applyState(state, dt) {
+  // lay potted balls to rest clustered in their nearest pocket's bag, so a full net shows up to 3 balls
+  const bags = new Map(); // pocketIndex → [ids], deepest-first order of arrival
+  for (const [id, s] of state) {
+    if (!s.pocketed || s.cleared) continue;
+    let bi = -1;
+    let bd = Infinity;
+    for (let i = 0; i < pocketNets.length; i++) { const d = Math.hypot(pocketNets[i].cx - s.pos.x, pocketNets[i].cy - s.pos.y); if (d < bd) { bd = d; bi = i; } }
+    if (bi >= 0) (bags.get(bi) ?? bags.set(bi, []).get(bi)).push(id);
+  }
+  const bagPos = new Map(); // id → resting {x,y,z}
+  for (const [bi, ids] of bags) {
+    const n = pocketNets[bi];
+    ids.sort();
+    ids.forEach((id, k) => {
+      const [sx, sy] = BAG_SLOTS[k % 3];
+      bagPos.set(id, { x: n.cx + sx * R * 1.1, y: n.cy + sy * R * 1.1, z: -(NET_DEPTH - R * 1.5) - Math.floor(k / 3) * R * 1.8 });
+    });
+  }
   for (const [id, s] of state) {
     const m = ballMeshes.get(id);
     if (!m) continue;
     if (s.pocketed) {
-      if (s.cleared) { m.grp.visible = true; m.grp.position.copy(P3(s.pos.x, s.pos.y, s.pos.z)); } // frozen where it left
-      else { m.grp.visible = true; m.grp.position.copy(P3(s.pos.x, s.pos.y, -0.05)); } // dropped into the pocket
+      if (s.cleared) { m.grp.visible = true; m.grp.position.copy(P3(s.pos.x, s.pos.y, s.pos.z)); continue; } // frozen where it left
+      const b = bagPos.get(id) ?? { x: s.pos.x, y: s.pos.y, z: -0.05 };
+      m.grp.visible = true;
+      m.grp.position.copy(P3(b.x, b.y, b.z)); // resting in the bag
       continue;
     }
     m.grp.visible = true;
@@ -287,6 +442,18 @@ const PC = PAD / 2;
 const R_IN = 42;   // inner ball radius (spin)
 const R_RING = 55; // ring centreline radius
 const RING_W = 12;
+// The lowest `vert` (follow−draw) the human may set right now: if the current aim forces the cue up
+// (ball / cushion behind the white), draw is locked out. −1 when the shot is open.
+function currentMinVert() {
+  if (!game || isAiTurn() || game.frame.frameOver) return -1;
+  const cue = game.pieces.find((p) => p.id === 'cue');
+  const pos = game.frame.ballInHand ? variant.defaultPlacement(game) : cue && cue.pos;
+  return pos ? forcedMinFollow(pos, (aimDeg * Math.PI) / 180) : -1;
+}
+function clampSpinToConstraint() {
+  const mv = currentMinVert();
+  if (mv > -1 && spin.vert < mv) spin.vert = mv;
+}
 function drawPad() {
   pctx.clearRect(0, 0, PAD, PAD);
   pctx.lineWidth = RING_W;
@@ -302,6 +469,17 @@ function drawPad() {
   pctx.lineWidth = 1; pctx.strokeStyle = '#b8b3a3'; pctx.stroke();
   pctx.strokeStyle = 'rgba(0,0,0,0.16)'; // crosshair
   pctx.beginPath(); pctx.moveTo(PC - R_IN, PC); pctx.lineTo(PC + R_IN, PC); pctx.moveTo(PC, PC - R_IN); pctx.lineTo(PC, PC + R_IN); pctx.stroke();
+  const mv = currentMinVert(); // lock out the draw zone when the cue is forced up (over a ball / off a cushion)
+  if (mv > -1) {
+    const lineY = PC - mv * R_IN; // below this line = forbidden (draw / insufficient follow)
+    pctx.save();
+    pctx.beginPath(); pctx.arc(PC, PC, R_IN, 0, Math.PI * 2); pctx.clip();
+    pctx.fillStyle = 'rgba(150,40,40,0.34)';
+    pctx.fillRect(PC - R_IN, lineY, 2 * R_IN, PC + R_IN - lineY);
+    pctx.restore();
+    pctx.strokeStyle = 'rgba(226,59,59,0.85)'; pctx.lineWidth = 1.5;
+    pctx.beginPath(); pctx.moveTo(PC - R_IN, lineY); pctx.lineTo(PC + R_IN, lineY); pctx.stroke();
+  }
   pctx.fillStyle = '#c0241f'; // contact-point dot: x = side, y = follow(up)/draw(down)
   pctx.beginPath(); pctx.arc(PC + spin.side * R_IN, PC - spin.vert * R_IN, 6, 0, Math.PI * 2); pctx.fill();
 }
@@ -318,6 +496,8 @@ function padFromPointer(ev) {
     let sy = -y / R_IN;
     const m = Math.hypot(sx, sy);
     if (m > 1) { sx /= m; sy /= m; } // clamp the contact point to the ball's edge
+    const mv = currentMinVert();
+    if (mv > -1 && sy < mv) sy = mv; // can't strike low when the cue is forced up
     spin = { side: sx, vert: sy };
   } else {
     elevAngle = Math.atan2(y, x); // marker follows the pointer round the ring
@@ -413,8 +593,10 @@ function sliderShot() {
   };
 }
 
-// Redraw the human's aim preview — only when it's actually the human's turn to line up a shot.
+// Redraw the human's aim preview — only when it's actually the human's turn to line up a shot. Also
+// re-evaluates the cue-lift spin lock for the new aim (draw may become unavailable / available again).
 function refreshHumanPreview() {
+  if (game && !playing && !game.frame.frameOver && !isAiTurn()) { clampSpinToConstraint(); drawPad(); refreshLabels(); }
   const depth = trajectoryDepth();
   if (!game || playing || game.frame.frameOver || isAiTurn() || depth <= 0) { clearPreview(); return; }
   drawPreviewPaths(computePreviewPaths(sliderShot(), depth));
@@ -460,7 +642,7 @@ el('trajectory').addEventListener('change', refreshHumanPreview);
 
 const aiEnabled = () => el('aimode').value !== 'human'; // 'off' human-vs-human, else vs AI / self-play
 const selfPlay = () => el('aimode').value === 'self';
-const difficulty = () => el('difficulty').value; // easy | medium | hard
+const difficulty = () => (selfPlay() ? 'deadly' : el('difficulty').value); // AI-vs-AI always plays at Deadly
 // Player 0 = you (unless self-play). Player 1 = AI (when AI is on).
 const isAiTurn = () => !game.frame.frameOver && (selfPlay() || (aiEnabled() && game.frame.turn === 1));
 
@@ -481,6 +663,9 @@ function updateScore() {
 function newFrameGame() {
   playing = false;
   endReplay();
+  endShotCam();
+  pauseUntil = 0;
+  pauseThen = null;
   aiLineup = null;
   aiRng = mulberry32(seedCounter++); // fresh seed each frame → varied openings, still reproducible
   game = newGame(variant, { rng: aiRng });
@@ -497,6 +682,7 @@ function newFrameGame() {
 // Resolve a shot through the real game/rules, replay it, then chain turns.
 function playShot(shot) {
   if (playing) return;
+  shot = applyCueConstraints(shot); // a raised cue (over a ball / off a cushion) can't draw — enforce it
   clearPreview(); // the aim line is spent the moment the shot is struck
   const res = takeShot(game, shot); // mutates game (rules + settled positions); returns the timeline
   timeline = res.timeline;
@@ -510,6 +696,7 @@ function playShot(shot) {
   soundIdx = 0;
   playing = true;
   lastFrame = performance.now();
+  beginShotCam(shot); // cue it from the player's angle, then pan out to watch
 }
 
 // --- pot replays -----------------------------------------------------------------------------
@@ -518,6 +705,8 @@ function playShot(shot) {
 // Any key skips it. Physics untouched — this just re-runs the interpolation with the camera driven.
 let replaying = false;
 let replayInfo = null;
+let pauseUntil = 0; // frame-clock time to hold before the next transition (pre-replay beat / post-replay hold)
+let pauseThen = null; // 'replay' (start the replay) | 'handoff' (end replay + next turn)
 let lastPots = [];
 let lastAngle = 0;
 const replaysOn = () => el('replays').checked;
@@ -528,31 +717,55 @@ function pottedObjectBalls(tl) {
   return last.balls.filter((b) => b.pocketed && !b.cleared && b.id !== 'cue').map((b) => b.id);
 }
 
-// When does the ball(s) drop? Used both to slow-mo the key moment and to CUT the replay just after it
-// (no dead time watching balls trickle to rest — TV cuts away once the shot's told its story).
-function potMoments() {
-  const drops = [];
-  for (const ev of timeline) if (ev.kind === 'pocket' && ev.hit && lastPots.includes(ev.hit.id)) drops.push(ev.t);
-  const first = drops.length ? drops[0] : endT;
-  const last = drops.length ? drops[drops.length - 1] : endT;
-  return { first, last };
+// Everything the replay must KEEP IN FRAME: the cue's starting position (so you see the shot) and every
+// potted ball's drop point. Also returns the drop TIMES to slow-mo the key moment and cut just after it.
+function replayFraming() {
+  const pts = [];
+  const start = replayState(timeline, planCache, 0);
+  const cue = start.get('cue');
+  if (cue) pts.push(P3(cue.pos.x, cue.pos.y, R));
+  const dropTs = [];
+  for (const ev of timeline) {
+    if (ev.kind !== 'pocket' || !ev.hit || !lastPots.includes(ev.hit.id)) continue;
+    dropTs.push(ev.t);
+    const b = ev.balls.find((x) => x.id === ev.hit.id);
+    if (b) pts.push(P3(b.pos.x, b.pos.y, R)); // where it dropped
+  }
+  const center = new THREE.Vector3();
+  for (const p of pts) center.add(p);
+  center.multiplyScalar(1 / Math.max(1, pts.length));
+  center.y = 0;
+  let radius = 0.28 * HY * S; // a floor so a single tight pot isn't jammed against the lens
+  for (const p of pts) radius = Math.max(radius, p.distanceTo(center));
+  return { center, radius, first: dropTs[0] ?? endT, last: dropTs[dropTs.length - 1] ?? endT };
+}
+
+// Camera angles (a unit "sit" direction from the framing centre, elevated). All keep every pot in view;
+// only the angle varies for cinematic variety.
+const REPLAY_ANGLES = ['overhead', 'threeq', 'low', 'broadcast'];
+function replayAngleDir(name) {
+  const d =
+    name === 'overhead' ? new THREE.Vector3(0.12, 1, 0.16) :
+    name === 'threeq' ? new THREE.Vector3(0.8, 1.0, 0.8) :
+    name === 'low' ? new THREE.Vector3(0.15, 0.5, 1.25) :
+    new THREE.Vector3(0, 0.95, 1.5); // broadcast: from the near end, elevated
+  return d.normalize();
 }
 
 function startReplay() {
   replaying = true;
-  const treatments = ['top', 'cue', 'motion', 'object'];
-  const treatment = treatments[Math.floor(Math.random() * treatments.length)];
-  const followId = treatment === 'object' ? lastPots[Math.floor(Math.random() * lastPots.length)] : 'cue';
-  const { first, last } = potMoments();
+  const f = replayFraming();
+  const angle = REPLAY_ANGLES[Math.floor(Math.random() * REPLAY_ANGLES.length)];
   replayInfo = {
-    treatment,
-    followId,
-    potT: first, // slow-mo hardest around the (first) drop
-    end: Math.min(endT, last + 0.9), // cut ~0.9 s after the last pot
+    center: f.center,
+    radius: f.radius,
+    dir: replayAngleDir(angle),
+    orbit: (Math.random() < 0.5 ? 1 : -1) * 0.28, // radians of gentle orbit across the replay, for life
+    potT: f.first, // slow-mo hardest around the first drop
+    end: Math.min(endT, f.last + 0.9), // cut ~0.9 s after the last pot
     camPos: new THREE.Vector3(),
     camTgt: new THREE.Vector3(),
     init: false,
-    prev: new Map(),
     savedPos: camera.position.clone(),
     savedTgt: controls.target.clone(),
   };
@@ -577,12 +790,12 @@ function replayRate(t) {
     const d = Math.abs(ev.t - t);
     if (d < nearest) nearest = d;
   }
-  const FAST = 2.8; // boring gaps zip by
-  const SLOW = 0.4; // collisions crawl
-  const W = 0.3; // seconds either side of an event that count as "near"
-  let r = FAST + (SLOW - FAST) * Math.max(0, 1 - nearest / W);
+  const FAR = 0.6; // dead stretches: a touch quicker, but still slow-mo (mostly ~half speed)
+  const NEAR = 0.35; // right at a collision: crawl
+  const W = 0.35; // seconds either side of an event that count as "near"
+  let r = FAR + (NEAR - FAR) * Math.max(0, 1 - nearest / W);
   const potNear = Math.abs(t - rm.potT);
-  if (potNear < 0.4) r = Math.min(r, 0.22 + 0.6 * (potNear / 0.4)); // extra-slow bullet-time on the drop
+  if (potNear < 0.4) r = Math.min(r, 0.2 + 0.5 * (potNear / 0.4)); // bullet-time on the drop
   return r;
 }
 
@@ -599,59 +812,152 @@ function endReplay() {
 }
 
 function skipReplay() {
-  if (!replaying) return;
+  if (!replaying && pauseThen !== 'replay') return; // nothing replay-ish pending
   playing = false;
+  pauseUntil = 0;
+  pauseThen = null;
   endReplay();
   onReplayEnd();
 }
 
-// Centroid of the balls moving THIS frame (fallback: the cue), so the "motion" camera tracks the action.
-function motionCentroid(state, rm) {
-  let sx = 0;
-  let sz = 0;
-  let n = 0;
-  for (const [id, s] of state) {
-    if (s.pocketed) continue;
-    const p = P3(s.pos.x, s.pos.y, s.pos.z);
-    const prev = rm.prev.get(id);
-    if (prev && p.distanceToSquared(prev) > (0.003 * S) ** 2) { sx += p.x; sz += p.z; n += 1; }
-    rm.prev.set(id, p.clone());
-  }
-  if (n === 0) { const c = state.get('cue'); return c ? P3(c.pos.x, c.pos.y, c.pos.z) : new THREE.Vector3(0, 0, 0); }
-  return new THREE.Vector3(sx / n, 0, sz / n);
-}
-
-// Compute the desired camera pose for the treatment from the current replay state, then damp toward it
-// (exponential smoothing → smooth motion; sudden direction changes at collisions are eased, not snapped).
-function driveReplayCamera(state) {
+// Frame the whole story: sit at the treatment's angle, far enough back that EVERY potted ball and the
+// cue's line stay in view, with a slow push-in + gentle orbit for cinematic life. Static framing (only
+// distance/orbit ease) → inherently smooth (no per-frame chase jitter); dt-based damping keeps it
+// frame-rate independent.
+const HALF_TAN = Math.tan(((45 * Math.PI) / 180) / 2); // camera vertical half-FOV
+function driveReplayCamera(state, dt) {
   const rm = replayInfo;
-  const u = HY * S; // table-scaled distance unit
-  const dPos = new THREE.Vector3();
-  const dTgt = new THREE.Vector3();
-  if (rm.treatment === 'top') {
-    dTgt.set(0, 0, 0);
-    dPos.set(0.001, u * 3.4, u * 0.55); // high overhead, a slight tilt so it reads as 3D
-  } else if (rm.treatment === 'cue' || rm.treatment === 'object') {
-    const b = state.get(rm.followId);
-    const bp = b && !b.pocketed ? P3(b.pos.x, b.pos.y, b.pos.z) : rm.camTgt.clone(); // freeze on the ball as it drops
-    const dir = new THREE.Vector3();
-    const prev = rm.prev.get(rm.followId);
-    if (prev) dir.copy(bp).sub(prev).setY(0);
-    if (dir.lengthSq() < 1e-8) dir.set(Math.cos(lastAngle), 0, Math.sin(lastAngle)); // physics (x,y)→scene (x,z)
-    dir.normalize();
-    dTgt.copy(bp).addScaledVector(dir, u * 0.25); // look a little ahead of the ball
-    dPos.copy(bp).addScaledVector(dir, -u * 0.9); // behind it…
-    dPos.y = u * 0.7; // …and above
-    rm.prev.set(rm.followId, bp.clone());
-  } else {
-    const c = motionCentroid(state, rm);
-    dTgt.copy(c);
-    dPos.set(c.x * 0.4, u * 2.0, c.z * 0.4 + u * 1.35); // elevated 3/4 over the action
-  }
+  const p = Math.min(1, simT / rm.end); // replay progress 0→1
+  const fit = (rm.radius / HALF_TAN) * 1.25 + rm.radius; // distance that frames `radius` with margin
+  const dist = fit * (1.32 - 0.3 * p); // slow push-in over the replay
+  const ang = rm.orbit * p; // gentle orbit
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  const d = rm.dir;
+  const dir = new THREE.Vector3(d.x * c - d.z * s, d.y, d.x * s + d.z * c); // rotate `dir` about the Y axis
+  const dPos = rm.center.clone().addScaledVector(dir, dist);
+  const dTgt = rm.center;
   if (!rm.init) { rm.camPos.copy(dPos); rm.camTgt.copy(dTgt); rm.init = true; }
-  else { rm.camPos.lerp(dPos, 0.05); rm.camTgt.lerp(dTgt, 0.09); }
+  else {
+    const kP = 1 - Math.exp(-dt / 0.3); // exponential damping (frame-rate independent)
+    const kT = 1 - Math.exp(-dt / 0.2);
+    rm.camPos.lerp(dPos, kP);
+    rm.camTgt.lerp(dTgt, kT);
+  }
   camera.position.copy(rm.camPos);
   camera.lookAt(rm.camTgt);
+}
+
+// --- cueing shot presentation (live play only) -----------------------------------------------
+// When a shot is struck, hold the balls at the start, show it from behind the cue ball down the aim
+// line with a cue-strike animation, then release the balls and rise up + pan out to watch the shot.
+// Live human + AI shots only — replays and the 147 exhibition drive their own cameras.
+let shotCam = null;
+const CUE_DUR = 2.2; // seconds of cueing (backswing + strike) before the balls are released
+const WATCH_EASE = 0.6; // damping time constant easing from the player's view out to the watch view
+
+// Elevation (radians) the cue butt must be raised to so the shaft + backswing clears any ball or
+// cushion sitting behind the cue ball on the aim line — a bridge over the ball / steep cue off the
+// cushion. The cue is never drawn passing through another ball or through a boundary.
+function cueLift(cx, cy, aim) {
+  const bwd = { x: -Math.cos(aim), y: -Math.sin(aim) }; // backward along the shaft
+  const nrm = { x: -bwd.y, y: bwd.x }; // lateral
+  const REACH = CUE_LEN + 0.3; // how far behind the ball the shaft + backswing extends (m)
+  let tan = 0; // required tan(elevation) = clearHeight / distance, worst case wins
+  for (const p of game.pieces) {
+    if (p.id === 'cue') continue;
+    const dx = p.pos.x - cx;
+    const dy = p.pos.y - cy;
+    const along = dx * bwd.x + dy * bwd.y;
+    if (along <= 0.02 || along > REACH) continue;
+    if (Math.abs(dx * nrm.x + dy * nrm.y) > 2 * R) continue; // ball not under the shaft
+    tan = Math.max(tan, (2 * R + 0.012) / along); // clear the ball's crown
+  }
+  // nearest cushion the backward ray crosses
+  let dEdge = Infinity;
+  if (bwd.x !== 0) { const t = ((bwd.x > 0 ? HX : -HX) - cx) / bwd.x; if (t > 0) dEdge = Math.min(dEdge, t); }
+  if (bwd.y !== 0) { const t = ((bwd.y > 0 ? HY : -HY) - cy) / bwd.y; if (t > 0) dEdge = Math.min(dEdge, t); }
+  if (dEdge < REACH) tan = Math.max(tan, (topZ + 0.012) / dEdge); // clear the rail top
+  return Math.min(Math.atan(tan), (72 * Math.PI) / 180); // cap the lift
+}
+
+// A cue forced up to clear a ball or cushion behind the white cannot strike low: draw (backspin)
+// becomes impossible and, steeper still, some follow is unavoidable. Returns the minimum legal `vert`
+// for a shot from `pos` along `aim` — −1 means draw is fully available (open shot). One rule, shared by
+// the shot pipeline (human + AI) and the spin-pad UI, so what you can set is exactly what can be played.
+function forcedMinFollow(pos, aim) {
+  const lift = cueLift(pos.x, pos.y, aim);
+  return lift > 0.15 ? Math.min(0.6, (lift - 0.15) * 1.4) : -1; // ~8.6°+ raised cue → no draw / forced follow
+}
+function applyCueConstraints(shot) {
+  const cue = game.pieces.find((p) => p.id === 'cue');
+  const pos = shot.cuePlacement || (cue && cue.pos);
+  if (!pos) return shot;
+  const mf = forcedMinFollow(pos, shot.angle);
+  if (mf > -1) shot.spin = { side: shot.spin?.side ?? 0, vert: Math.max(shot.spin?.vert ?? 0, mf) };
+  return shot;
+}
+
+function beginShotCam(shot) {
+  const start = replayState(timeline, planCache, 0).get('cue');
+  if (!start) { shotCam = null; return; }
+  const Cw = P3(start.pos.x, start.pos.y, R);
+  const aimW = new THREE.Vector3(Math.cos(shot.angle), 0, Math.sin(shot.angle)); // physics (x,y)→world (x,z)
+  const up = new THREE.Vector3(0, 1, 0);
+  const lift = cueLift(start.pos.x, start.pos.y, shot.angle);
+  const cueDir = aimW.clone().multiplyScalar(Math.cos(lift)).addScaledVector(up, -Math.sin(lift)).normalize(); // tip points at the ball, tilted down by the lift
+  // sit behind the CUE BUTT (the whole stick, ~1.45 m, then a little more) so the full cue is in frame,
+  // over-the-shoulder and looking down the aim line past the ball
+  const cuePos = Cw.clone().addScaledVector(aimW, -(CUE_LEN + 0.5) * S).addScaledVector(up, (0.82 + 1.1 * Math.sin(lift)) * S); // rise the lens with the butt
+  const cueLook = Cw.clone().addScaledVector(aimW, 1.5 * S); cueLook.y = 0.1 * S; // low, down the aim line
+  const watchPos = Cw.clone().addScaledVector(aimW, -1.3 * S).addScaledVector(up, 2.1 * S); // risen up behind
+  shotCam = {
+    start: performance.now(), aimW, cueDir, tipContact: Cw.clone().addScaledVector(aimW, -R * S),
+    cuePos, cueLook, watchPos, watchLook: new THREE.Vector3(0, 0, 0), // table centre → seamless controls handoff
+    camPos: cuePos.clone(), camTgt: cueLook.clone(), struck: false,
+  };
+  controls.enabled = false;
+  camera.position.copy(cuePos);
+  camera.lookAt(cueLook);
+  placeCue(0);
+  cueStick.visible = true;
+}
+// Position the cue with its tip `back` metres behind contact along the (possibly elevated) shaft axis.
+function placeCue(back) {
+  const dir = shotCam.cueDir; // unit tip-forward (toward the ball, tilted down by any lift)
+  const tip = shotCam.tipContact.clone().addScaledVector(dir, -back * S);
+  cueStick.position.copy(tip).addScaledVector(dir, -(CUE_LEN / 2) * S);
+  cueStick.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+}
+// Cueing phase: a few feather strokes, then a full backswing and strike to contact. Returns false
+// (and releases the balls) at contact.
+function driveShotCamCueing(now) {
+  const cp = Math.min(1, (now - shotCam.start) / (CUE_DUR * 1000));
+  const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+  let back; // metres the tip is drawn back from contact
+  if (cp < 0.6) {
+    back = 0.09 * (0.5 - 0.5 * Math.cos((cp / 0.6) * Math.PI * 6)); // ~3 practice feathers
+  } else {
+    const q = (cp - 0.6) / 0.4;
+    back = q < 0.6 ? 0.28 * easeOut(q / 0.6) : 0.28 * (1 - ((q - 0.6) / 0.4) ** 2); // full draw, then strike
+  }
+  placeCue(Math.max(0, back));
+  camera.position.copy(shotCam.cuePos);
+  camera.lookAt(shotCam.cueLook);
+  if (cp >= 1) { cueStick.visible = false; shotCam.struck = true; return false; }
+  return true;
+}
+// Watch phase: ease the camera from the player's view out to the risen broadcast view as balls run.
+function driveShotCamWatch(dt) {
+  shotCam.camPos.lerp(shotCam.watchPos, 1 - Math.exp(-dt / WATCH_EASE));
+  shotCam.camTgt.lerp(shotCam.watchLook, 1 - Math.exp(-dt / (WATCH_EASE * 0.8)));
+  camera.position.copy(shotCam.camPos);
+  camera.lookAt(shotCam.camTgt);
+}
+function endShotCam() {
+  shotCam = null;
+  cueStick.visible = false;
+  controls.enabled = true;
 }
 
 // The human's shot from the sliders (aim/power/spin/elevation). Ball-in-hand uses the default D spot.
@@ -748,7 +1054,12 @@ function maybeAiTurn() {
 function onReplayEnd() {
   syncBallMeshes(game.pieces); // authoritative resting positions from the rules reconciliation
   updateScore();
-  if (game.frame.frameOver) { status.textContent = game.frame.message; return; }
+  if (game.frame.frameOver) {
+    status.textContent = game.frame.message;
+    // Watch AI vs AI → rack a fresh frame automatically after a beat so it plays on indefinitely
+    if (selfPlay() && !exhibition) setTimeout(() => { if (game.frame.frameOver && selfPlay() && !exhibition) newFrameGame(); }, 3000);
+    return;
+  }
   maybeAiTurn();
   if (!isAiTurn()) resetHumanControls(); // your shot → start from a reasonable first try (1.0, no spin)
   refreshHumanPreview(); // if it's now your shot, show the aim line
@@ -760,6 +1071,8 @@ function setVariant(v) {
   aiLineup = null;
   playing = false;
   endReplay();
+  pauseUntil = 0;
+  pauseThen = null;
   variant = v;
   applyVariantGeom();
   rebuildTable();
@@ -836,7 +1149,7 @@ function holdAimButton(button, dir) {
 holdAimButton(el('angleL'), -1);
 holdAimButton(el('angleR'), 1);
 window.addEventListener('keydown', (ev) => {
-  if (replaying) { skipReplay(); ev.preventDefault(); return; } // any key skips a pot replay
+  if (replaying || pauseThen === 'replay') { skipReplay(); ev.preventDefault(); return; } // any key skips a pot replay
   if (document.activeElement === sliders.angle) return; // let the focused slider handle its own arrows
   if (ev.key === 'ArrowLeft') { aimHeldDir = -1; ev.preventDefault(); }
   else if (ev.key === 'ArrowRight') { aimHeldDir = 1; ev.preventDefault(); }
@@ -901,6 +1214,112 @@ window.addEventListener('pointerdown', unlockOnce, true);
 window.addEventListener('keydown', unlockOnce, true);
 el('sound').addEventListener('change', unlockAudio);
 
+// --- 147 exhibition + video recording --------------------------------------------------------
+// Plays a scripted, validated 147 clearance (src/exhibition.build147) as a continuous montage under a
+// slowly-orbiting broadcast camera, optionally recording the canvas to a downloadable webm.
+let exhibition = null; // { steps, i, orbit } while a 147 is playing
+let mediaRec = null;
+let recChunks = [];
+
+// Prefer H.264/MP4 — it's what Facebook and (critically) WhatsApp actually play; WhatsApp treats a
+// .webm as a document. Fall back to VP9/WebM only where the browser can't record MP4.
+const REC_MIMES = [
+  'video/mp4;codecs=avc1.640028', // H.264 High
+  'video/mp4;codecs=avc1.42E01E', // H.264 Baseline
+  'video/mp4',
+  'video/webm;codecs=vp9',
+  'video/webm;codecs=vp8',
+  'video/webm',
+];
+function startRecording() {
+  try {
+    const stream = renderer.domElement.captureStream(30);
+    const mime = REC_MIMES.find((m) => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    recChunks = [];
+    mediaRec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8e6 });
+    mediaRec.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+    mediaRec.start(1000);
+  } catch { mediaRec = null; }
+}
+function stopRecording() {
+  if (!mediaRec) return;
+  const rec = mediaRec;
+  mediaRec = null;
+  rec.onstop = () => {
+    const blob = new Blob(recChunks, { type: rec.mimeType });
+    window.__last147 = blob; // headless extraction hook
+    const ext = (rec.mimeType || '').startsWith('video/mp4') ? 'mp4' : 'webm';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `snooker-147.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+  };
+  rec.stop();
+}
+
+function frameExhibitionCamera() {
+  camera.position.set(0, HX * S * 1.35, HX * S * 2.05); // elevated broadcast angle framing the whole table
+  camera.lookAt(0, 0, 0);
+}
+function driveExhibitionCamera(dt) {
+  exhibition.orbit += dt * 0.05; // gentle slow orbit, whole table always in view
+  const a = exhibition.orbit;
+  camera.position.set(Math.sin(a) * HX * S * 2.05, HX * S * 1.35, Math.cos(a) * HX * S * 2.05);
+  camera.lookAt(0, 0, 0);
+}
+
+function playExhibitionStep() {
+  const step = exhibition.steps[exhibition.i];
+  syncBallMeshes(step.pieces);
+  orient.clear();
+  timeline = step.timeline;
+  planCache = buildPlanCache(timeline, R);
+  endT = timeline.length ? timeline[timeline.length - 1].t : 0;
+  simT = 0;
+  soundIdx = 0;
+  playing = true;
+  lastFrame = performance.now();
+  // draw the predicted trajectory for this shot — the whole point of the engine is that it solves the
+  // full path ahead of time; the balls then trace those very lines as the shot plays out.
+  drawPreviewPaths(samplePreview({ timeline }));
+  status.textContent = exhibition.i === 0 ? '147 · the break' : `147 · pot ${exhibition.i} / 36`;
+}
+function nextExhibitionStep() {
+  exhibition.i += 1;
+  if (exhibition.i >= exhibition.steps.length) { finishExhibition(); return; }
+  playExhibitionStep();
+}
+function finishExhibition() {
+  playing = false;
+  exhibition = null;
+  clearPreview();
+  controls.enabled = true;
+  frameCamera();
+  status.textContent = 'Break of 147! — recording downloaded';
+  stopRecording();
+}
+async function startExhibition(record) {
+  if (variant !== snooker) { el('game').value = 'snooker'; setVariant(snooker); }
+  aiLineup = null;
+  pauseThen = null;
+  pauseUntil = 0;
+  endReplay();
+  endShotCam();
+  controls.enabled = false;
+  frameExhibitionCamera();
+  status.textContent = 'Building the 147…';
+  const steps = await build147((n, total) => { status.textContent = `Building the 147… (${n + 1}/${total})`; });
+  if (steps.length < 37) { status.textContent = 'exhibition build failed'; controls.enabled = true; frameCamera(); return; }
+  exhibition = { steps, i: 0, orbit: -0.55 };
+  if (record) startRecording();
+  playExhibitionStep();
+}
+el('rec147').addEventListener('click', () => { startExhibition(true); });
+
 function frame(now) {
   const dt = Math.min((now - lastFrame) / 1000, 0.05);
   lastFrame = now;
@@ -930,6 +1349,11 @@ function frame(now) {
     if (p >= 1) { const shot = aiLineup.final; aiLineup = null; playShot(shot); }
   }
   if (playing && timeline.length) {
+    if (shotCam && !shotCam.struck && !replaying && !exhibition) {
+      // cueing: hold the balls at the shot start, animate the cue, hold the player's view
+      applyState(replayState(timeline, planCache, 0), 0);
+      driveShotCamCueing(now);
+    } else {
     // a replay warps time (slow-mo the pot, fast-forward the dead rolling); the live pass is 1×
     const simDt = dt * (replaying ? replayRate(simT) : 1);
     simT += simDt;
@@ -941,18 +1365,39 @@ function frame(now) {
       soundIdx += 1;
       const s = timeline[soundIdx];
       if (s.kind === 'pair' || s.kind === 'rail' || s.kind === 'jaw' || s.kind === 'frame' || s.kind === 'bed') knock(s.kind, s.intensity || 0);
+      else if (s.kind === 'pocket' && s.hit) {
+        const fin = timeline[timeline.length - 1].balls.find((x) => x.id === s.hit.id);
+        if (fin && fin.pocketed && !fin.cleared) { // a genuine drop (not a rattle/rebound) → swing the net
+          const b = s.balls.find((x) => x.id === s.hit.id);
+          if (b) kickNet(b.pos.x, b.pos.y, b.vel.x, b.vel.y, Math.hypot(b.vel.x, b.vel.y));
+        }
+      }
     }
     const state = replayState(timeline, planCache, simT);
     applyState(state, simDt);
-    if (replaying) driveReplayCamera(state);
+    if (replaying) driveReplayCamera(state, dt);
+    else if (exhibition) driveExhibitionCamera(dt);
+    else if (shotCam) driveShotCamWatch(dt); // risen broadcast view as the shot runs
     if (ended) {
       playing = false;
-      if (replaying) { endReplay(); onReplayEnd(); } // the cinematic pass finished → hand off
-      else if (replaysOn() && lastPots.length) startReplay(); // a pot → replay the shot cinematically
+      if (shotCam) endShotCam(); // hand the camera back to the orbit controls (target is already centre)
+      if (exhibition) nextExhibitionStep(); // 147 montage → next pot (no replays/rules)
+      else if (replaying) { pauseUntil = now + 800; pauseThen = 'handoff'; } // hold on the pot (badge up), then hand off
+      else if (replaysOn() && lastPots.length) { pauseUntil = now + 500; pauseThen = 'replay'; } // a beat, then replay
       else onReplayEnd();
     }
+    }
   }
-  if (!replaying) controls.update(); // don't fight the scripted replay camera
+  // timed transitions: a 500 ms beat before a replay, an 800 ms hold on the pot after it
+  if (pauseThen && now >= pauseUntil) {
+    const then = pauseThen;
+    pauseUntil = 0;
+    pauseThen = null;
+    if (then === 'replay') startReplay();
+    else { endReplay(); onReplayEnd(); }
+  }
+  if (!replaying && !exhibition && !shotCam) controls.update(); // don't fight the replay / exhibition / cueing camera
+  updateNets(now); // swing any pocket net that a ball has just dropped into
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }

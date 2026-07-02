@@ -236,6 +236,11 @@ export const pool = {
       ctx.beginPath(); ctx.arc(p.px, p.py, 2, 0, Math.PI * 2); ctx.fill();
     }
   },
+  // 3D markings: the head string plus the head & foot spots.
+  markings: () => ({
+    lines: [[{ x: HEAD_X, y: -HY }, { x: HEAD_X, y: HY }]],
+    spots: [{ x: FOOT_X, y: 0 }, { x: HEAD_X, y: 0 }],
+  }),
 
   sideValue(frame, i) {
     if (frame.open || !frame.assigned[i]) return '—';

@@ -26,19 +26,25 @@
       .aimrow input[type="range"] { flex: 1; min-width: 0; }
       #status { font-size: 12px; color: #8fa3b5; min-height: 32px; line-height: 1.4; }
       .hint { font-size: 11px; color: #6f8496; }
-      /* cinematic REPLAY overlay: letterbox bars + a pulsing badge, shown only during a pot replay */
-      #replayband { position: absolute; inset: 0; pointer-events: none; display: none; z-index: 3; }
+      /* cinematic REPLAY overlay: letterbox bars, a big centred badge, and a red vignette — unmissable */
+      #replayband { position: absolute; inset: 0; pointer-events: none; display: none; z-index: 3;
+        box-shadow: inset 0 0 160px rgba(226,59,59,0.22); }
       #replayband.on { display: block; }
-      #replayband .lb { position: absolute; left: 0; right: 0; height: 8%; background: #000; }
-      #replayband .lb.top { top: 0; }
-      #replayband .lb.bottom { bottom: 0; }
-      #replayband .badge { position: absolute; top: calc(8% + 16px); left: 24px; display: flex; align-items: center; gap: 9px;
-        font-weight: 800; letter-spacing: 2px; font-size: 15px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
-      #replayband .dot { width: 12px; height: 12px; border-radius: 50%; background: #e23b3b; box-shadow: 0 0 10px #e23b3b;
-        animation: replaypulse 1s ease-in-out infinite; }
-      #replayband .sub { position: absolute; bottom: calc(8% + 12px); left: 24px; font-size: 11px; letter-spacing: 1px;
-        color: #cbd6e0; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
-      @keyframes replaypulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+      #replayband .lb { position: absolute; left: 0; right: 0; height: 10%; background: #000; }
+      #replayband .lb.top { top: 0; box-shadow: 0 6px 22px rgba(0,0,0,.6); }
+      #replayband .lb.bottom { bottom: 0; box-shadow: 0 -6px 22px rgba(0,0,0,.6); }
+      #replayband .badge { position: absolute; top: calc(10% + 22px); left: 50%; transform: translateX(-50%);
+        display: flex; align-items: center; gap: 16px; padding: 12px 30px; border-radius: 999px;
+        background: rgba(10,12,16,0.62); border: 2px solid rgba(226,59,59,0.95);
+        font-weight: 900; letter-spacing: 6px; font-size: 34px; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.7);
+        animation: replaypop .5s cubic-bezier(.2,1.4,.4,1) 1; }
+      #replayband .dot { width: 22px; height: 22px; border-radius: 50%; background: #e23b3b;
+        box-shadow: 0 0 18px 4px #e23b3b; animation: replaypulse 1s ease-in-out infinite; }
+      #replayband .sub { position: absolute; bottom: calc(10% + 18px); left: 50%; transform: translateX(-50%);
+        text-align: center; font-size: 15px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase;
+        color: #e6edf3; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
+      @keyframes replaypulse { 0%,100% { opacity: 1; } 50% { opacity: .2; } }
+      @keyframes replaypop { from { transform: translateX(-50%) scale(.7); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
     </style>
   </head>
   <body>
@@ -96,6 +102,7 @@
         </div>
         <button id="play">▶ Play your shot</button>
         <button id="newframe" class="sec">New frame</button>
+        <button id="rec147" class="sec">⏺ Record a 147 (video)</button>
         <label class="chk"><input type="checkbox" id="sound" checked /> Sound</label>
         <label class="chk"><input type="checkbox" id="replays" checked /> Pot replays (press any key to skip)</label>
         <div id="status"></div>

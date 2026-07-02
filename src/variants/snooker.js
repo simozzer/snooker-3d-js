@@ -172,6 +172,15 @@ export const snooker = {
       ctx.beginPath(); ctx.arc(p.px, p.py, 2, 0, Math.PI * 2); ctx.fill();
     }
   },
+  // 3D markings (physics-plane geometry the renderer lays on the bed): baulk line, the D, the 6 spots.
+  markings() {
+    const bx = baulkX();
+    return {
+      lines: [[{ x: bx, y: -HY }, { x: bx, y: HY }]],
+      arcs: [{ cx: bx, cy: 0, r: TABLE.dRadius, a0: Math.PI / 2, a1: (3 * Math.PI) / 2 }],
+      spots: Object.values(spots()),
+    };
+  },
 
   // --- HUD ---
   sideValue: (frame, i) => String(frame.scores[i]),

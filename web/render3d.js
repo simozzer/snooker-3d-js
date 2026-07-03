@@ -657,7 +657,7 @@ function beginBallInHand() {
   setCuePiecePos(heldCuePos);
   aiPlace = null;
   if (isAiTurn()) { placing = false; }
-  else { placing = true; status.textContent = `${variant.ballInHandLabel || 'Ball in hand'} — click the bed to place, then aim with ◀ ▶ and Play.`; }
+  else { placing = true; status.textContent = `${variant.ballInHandLabel || 'Ball in hand'} — drag the white to place it, click the table to aim.`; }
 }
 function endBallInHand() { placing = false; heldCuePos = null; aiPlace = null; }
 
@@ -1498,20 +1498,41 @@ function pointerToTable(ev) {
   return { x: hit.x / S, y: hit.z / S }; // three (x,z,y) → physics (x,y)
 }
 
+// Ball-in-hand uses the natural pool interaction: GRAB the white and drag it to a legal spot, while a
+// plain click of the bed AIMS (as always). No mode toggle — grabbing the ball vs clicking empty cloth
+// disambiguates, so placing and aiming feel like one fluid step instead of two awkward phases.
 let aimDown = null;
-renderer.domElement.addEventListener('pointerdown', (ev) => { aimDown = { x: ev.clientX, y: ev.clientY }; });
+let grabCue = false; // dragging the cue ball to place it (ball-in-hand)
+const CUE_GRAB_PX = 30; // screen-space grab radius around the white
+function cueScreenXY() {
+  const c = cueBallPos();
+  const v = P3(c.x, c.y, R).clone().project(camera);
+  const r = renderer.domElement.getBoundingClientRect();
+  return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height, behind: v.z > 1 };
+}
+function nearCue(ev) {
+  if (!placing || !game.frame.ballInHand) return false;
+  const s = cueScreenXY();
+  return !s.behind && Math.hypot(ev.clientX - s.x, ev.clientY - s.y) < CUE_GRAB_PX;
+}
+function dragCueTo(ev) {
+  const t = pointerToTable(ev);
+  if (t && variant.placementLegal(game, t.x, t.y)) { heldCuePos = { x: t.x, y: t.y }; setCuePiecePos(heldCuePos); refreshHumanPreview(); }
+}
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  aimDown = { x: ev.clientX, y: ev.clientY };
+  grabCue = !playing && !sharedReplay && !isAiTurn() && nearCue(ev);
+  if (grabCue) { controls.enabled = false; try { renderer.domElement.setPointerCapture(ev.pointerId); } catch { /* non-capturable */ } dragCueTo(ev); }
+});
+renderer.domElement.addEventListener('pointermove', (ev) => { if (grabCue) dragCueTo(ev); });
 renderer.domElement.addEventListener('pointerup', (ev) => {
   const start = aimDown;
   aimDown = null;
+  if (grabCue) { grabCue = false; controls.enabled = true; return; } // finished dragging the white into place
   if (!start || Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 6) return; // a drag → orbit, not aim
   if (!game || playing || sharedReplay || isAiTurn() || game.frame.frameOver) return;
   const t = pointerToTable(ev);
   if (!t) return;
-  // ball-in-hand: a click PLACES the cue ball (to a legal spot); aiming is via the ◀▶ / slider controls
-  if (placing) {
-    if (variant.placementLegal(game, t.x, t.y)) { heldCuePos = { x: t.x, y: t.y }; setCuePiecePos(heldCuePos); refreshHumanPreview(); }
-    return;
-  }
   const c = cueBallPos();
   if (t.x === c.x && t.y === c.y) return;
   cancelTrickAuto(); // you're aiming yourself → cancel the auto-demo

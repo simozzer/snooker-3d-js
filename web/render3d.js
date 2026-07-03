@@ -22,6 +22,7 @@ import { aiTurn, chooseShotFinish, difficultyConfig, executeShot } from '../src/
 import { build147 } from '../src/exhibition.js';
 import { getLevel, runTrickShot, findSolution, CURATED_COUNT } from '../src/trickshots.js';
 import { buildPlanCache, replayState } from './replay.js';
+import { encodeFrame, decodeFrame, variantId as shareVariantId, variantById as shareVariantById } from '../src/share.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
 // from the selected variant. This file only draws — the physics/rules/AI are the headless engine the
@@ -732,6 +733,10 @@ let playing = false;
 let simT = 0;
 let lastFrame = 0;
 let seedCounter = 1;
+// Shareable frame: the current frame's rack seed + the executed shots, encodable into a link (src/share.js).
+let frameSeed = 0;
+let frameShots = [];
+let sharedReplay = null; // { shots, i } while watching a shared frame back
 
 // --- broadcast HUD: running break, session-high, celebratory banners -------------------------
 // A "break" is the run a player builds in one unbroken visit — points in snooker/billiards
@@ -813,7 +818,10 @@ function newFrameGame() {
   pauseUntil = 0;
   pauseThen = null;
   aiLineup = null;
-  aiRng = mulberry32(seedCounter++); // fresh seed each frame → varied openings, still reproducible
+  sharedReplay = null;
+  frameSeed = seedCounter++; // record the rack seed so this frame is shareable/reproducible
+  frameShots = [];
+  aiRng = mulberry32(frameSeed); // fresh seed each frame → varied openings, still reproducible
   game = newGame(variant, { rng: aiRng });
   resetBreaks({ keepHigh: true }); // new frame, but the session-high break carries across frames
   syncBallMeshes(game.pieces);
@@ -832,6 +840,7 @@ function playShot(shot) {
   if (playing) return;
   shot = applyCueConstraints(shot); // a raised cue (over a ball / off a cushion) can't draw — enforce it
   clearPreview(); // the aim line is spent the moment the shot is struck
+  if (!sharedReplay) frameShots.push({ angle: shot.angle, speed: shot.speed, spin: { side: shot.spin?.side ?? 0, vert: shot.spin?.vert ?? 0 }, elevation: shot.elevation ?? 0, cuePlacement: shot.cuePlacement ?? null }); // record for sharing
   const shooter = game.frame.turn; // who is at the table (before the rules reassign the turn)
   const scoresBefore = Array.isArray(game.frame.scores) ? [...game.frame.scores] : null;
   const res = takeShot(game, shot); // mutates game (rules + settled positions); returns the timeline
@@ -1182,7 +1191,7 @@ function driveAimCam(dt) {
 
 // The human's shot from the sliders (aim/power/spin/elevation). Ball-in-hand uses the default D spot.
 function humanShot() {
-  if (playing) return;
+  if (playing || sharedReplay) return;
   if (trick) { cancelTrickAuto(); if (!trick.awaiting) playTrickShot(sliderShot()); return; }
   if (isAiTurn() || game.frame.frameOver) return;
   playShot(sliderShot());
@@ -1278,6 +1287,13 @@ function onReplayEnd() {
   syncBallMeshes(game.pieces); // authoritative resting positions from the rules reconciliation
   updateScore();
   flushBanner(); // century / frame-won banner, held until the shot has settled
+  if (sharedReplay) { // watching a shared frame back → chain the next recorded shot
+    sharedReplay.i += 1;
+    if (!game.frame.frameOver && sharedReplay.i < sharedReplay.shots.length) {
+      setTimeout(() => { if (sharedReplay) playShot(sharedReplay.shots[sharedReplay.i]); }, 600);
+    } else { sharedReplay = null; status.textContent = 'Shared frame complete — New frame to play your own.'; }
+    return;
+  }
   if (game.frame.frameOver) {
     status.textContent = game.frame.message;
     // Watch AI vs AI → rack a fresh frame automatically after a beat so it plays on indefinitely
@@ -1324,6 +1340,45 @@ el('trick-retry').addEventListener('click', () => loadTrickLevel(trick ? trick.i
 el('trick-next').addEventListener('click', () => { if (trick) loadTrickLevel(trick.index + 1); });
 el('trick-show').addEventListener('click', showTrickSolution);
 
+// --- shareable frames -------------------------------------------------------------------------
+// Because the engine is deterministic, the current frame = (variant, rack seed, executed shots). Encode
+// that into a ?frame= link (src/share.js); opening the link re-simulates and plays the exact frame back.
+el('sharelink').addEventListener('click', () => {
+  if (trick) { status.textContent = 'Sharing is for game frames, not Trick Shots.'; return; }
+  const token = encodeFrame({ variantId: shareVariantId(variant), seed: frameSeed, shots: frameShots });
+  const url = `${location.origin}${location.pathname}?frame=${token}`;
+  const done = () => { status.textContent = `Share link copied (${frameShots.length} shot${frameShots.length === 1 ? '' : 's'}).`; };
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done).catch(() => window.prompt('Share link:', url));
+  else window.prompt('Share link:', url);
+});
+
+// Load a shared frame: rack with its seed, then play its recorded shots back in order (watched, not
+// replayed by rules/AI). Reuses the shot-cam + broadcast HUD so it looks like a live frame.
+function startSharedReplay(decoded) {
+  const v = shareVariantById(decoded.variantId);
+  exitTrickShots();
+  el('game').value = v.id;
+  variant = v; applyVariantGeom(); rebuildTable(); frameCamera();
+  for (const [, m] of ballMeshes) scene.remove(m.grp);
+  ballMeshes.clear();
+  const h1 = document.querySelector('#panel h1');
+  if (h1) h1.textContent = `${variant.name ?? 'SNOOKER'} · 3D`;
+  updateRulesPanel();
+  playing = false; endReplay(); endShotCam(); aiLineup = null; aiPlace = null;
+  frameSeed = decoded.seed;
+  aiRng = mulberry32(decoded.seed);
+  game = newGame(variant, { rng: aiRng });
+  resetBreaks();
+  syncBallMeshes(game.pieces);
+  orient.clear();
+  endBallInHand(); // a watched replay isn't interactive; each shot carries its own recorded placement
+  updateScore();
+  sharedReplay = { shots: decoded.shots, i: 0 };
+  status.textContent = `Shared frame — ${decoded.shots.length} shot${decoded.shots.length === 1 ? '' : 's'} · watching`;
+  if (decoded.shots.length) playShot(decoded.shots[0]);
+  else sharedReplay = null;
+}
+
 // --- aiming: click the table, or fine-tune with buttons / arrow keys --------------------------
 // A click on the bed raycasts to the table plane and aims the cue ball at that point; a drag is left
 // for OrbitControls (orbit), so we only treat a near-stationary press as an aim click. ◀ ▶ and the
@@ -1365,7 +1420,7 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   const start = aimDown;
   aimDown = null;
   if (!start || Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 6) return; // a drag → orbit, not aim
-  if (!game || playing || isAiTurn() || game.frame.frameOver) return;
+  if (!game || playing || sharedReplay || isAiTurn() || game.frame.frameOver) return;
   const t = pointerToTable(ev);
   if (!t) return;
   // ball-in-hand: a click PLACES the cue ball (to a legal spot); aiming is via the ◀▶ / slider controls
@@ -1624,6 +1679,7 @@ function startTrickShots(startIndex = 0) {
   exhibition = null;
   trick = { index: startIndex, level: null, awaiting: false, passed: false };
   endBallInHand();
+  sharedReplay = null;
   priorAiMode = el('aimode').value;
   el('aimode').value = 'self'; // start as a Watch AI-vs-AI demonstration (Deadly)
   setTrickUI(true);
@@ -1853,8 +1909,12 @@ requestAnimationFrame(frame);
 // Deep-link: ?tricky=true jumps straight into Trick Shots on the Leapfrog and auto-demos it. A
 // ?tricky=<levelId> (e.g. guardrail) or ?tricky=<n> targets a specific level.
 {
-  const q = new URLSearchParams(location.search).get('tricky');
-  if (q) {
+  const params = new URLSearchParams(location.search);
+  const q = params.get('tricky');
+  const frameToken = params.get('frame');
+  if (frameToken) {
+    try { startSharedReplay(decodeFrame(frameToken)); } catch { status.textContent = 'That share link couldn’t be read.'; }
+  } else if (q) {
     const idx = q === 'true' ? TRICK_LEVELS.leapfrog : (TRICK_LEVELS[q] ?? (Number.isInteger(+q) ? +q : TRICK_LEVELS.leapfrog));
     el('game').value = 'trickshots';
     startTrickShots(idx);

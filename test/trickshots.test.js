@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CURATED, CURATED_COUNT, getLevel, generateLevel, findSolution, runTrickShot,
-  tableGeom, cueRail, jumped, bankedBeforeContact, cueSafe, jumpSeed, ghost,
+  tableGeom, cueRail, jumped, leapt, bankedOffCue, cueSafe, jumpSeed, ghost,
 } from '../src/trickshots.js';
 
 // A solution the searcher returns must, when actually played, meet the goal — no self-deception.
@@ -24,10 +24,12 @@ test('every curated famous shot is solvable, and its solution really wins', () =
   for (const level of CURATED) assertSolvable(level, `curated "${level.name}"`);
 });
 
-test('"The Leapfrog" is genuinely a jump shot (cue goes airborne)', () => {
+test('"The Leapfrog" is a REAL jump — the cue clears a ball height, not a cushion hop', () => {
+  const g = tableGeom('pool');
   const level = CURATED.find((l) => l.id === 'leapfrog');
-  const { res } = assertSolvable(level, 'leapfrog');
-  assert.ok(jumped(res), 'the winning stroke never left the bed — not a jump');
+  const { res, sol } = assertSolvable(level, 'leapfrog');
+  assert.ok(leapt(res, g.R), 'the winning stroke did not rise to a real jump height');
+  assert.ok((sol.elevation || 0) > 0.1, `expected an elevated cue, got elevation ${sol.elevation}`);
 });
 
 test('the analytic projectile seed jumps clean over the blocker (no elevation sweep)', () => {
@@ -57,10 +59,11 @@ test('the analytic projectile seed jumps clean over the blocker (no elevation sw
   assert.notEqual(res.firstContact, 'blk', 'the analytic seed clipped the blocker instead of clearing it');
 });
 
-test('"The Guardrail" genuinely banks off the laid cue stick before contact', () => {
+test('"The Guardrail" banks off the laid CUE STICK specifically (not a cushion)', () => {
+  const g = tableGeom('pool');
   const level = CURATED.find((l) => l.id === 'guardrail');
   const { res } = assertSolvable(level, 'guardrail');
-  assert.ok(bankedBeforeContact(res), 'the winning stroke did not bank before hitting the object ball');
+  assert.ok(bankedOffCue(res, level.rails, g.R), 'the winning stroke never touched the laid cue stick');
 });
 
 test('a cue stick laid as a rail actually deflects a ball (physics, not just geometry)', () => {

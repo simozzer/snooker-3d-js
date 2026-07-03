@@ -83,9 +83,35 @@ export function pottedIntoIndex(res, id) {
   for (const e of res.timeline) if (e.kind === 'pocket' && e.hit && e.hit.id === id) return e.pocketIndex;
   return -1;
 }
-// Did `id` (default the cue) go airborne at any point — i.e. a genuine jump shot?
+// Did `id` (default the cue) go airborne at any point — i.e. a genuine jump shot? NOTE: this is TRUE
+// even for a sub-millimetre cushion hop, so it's too weak to define a "jump level" — use leapt() for that.
 export function jumped(res, id = 'cue') {
   for (const e of res.timeline) { const b = e.balls.find((x) => x.id === id); if (b && b.phase === 'flight') return true; }
+  return false;
+}
+// A REAL leap: the ball's centre rises to ≥ ~2.4R above the bed (rest is R) — high enough to clear a
+// ball, not the trivial hop a firm cushion contact produces. This is what a jump LEVEL must require, so
+// the solver can't satisfy it with a flat shot.
+export function leapt(res, R, id = 'cue') {
+  let maxZ = 0;
+  for (const e of res.timeline) { const b = e.balls.find((x) => x.id === id); if (b && b.pos.z > maxZ) maxZ = b.pos.z; }
+  return maxZ >= 2.4 * R;
+}
+// Did the cue bank off one of the LAID CUE STICKS (not a table cushion)? At a rail-contact event the
+// ball centre sits ~R+rc from the rail axis; check that point lies on a cue-stick segment. This lets a
+// cue-rail level demand the stick is actually used, instead of any old cushion bank.
+export function bankedOffCue(res, cueRails, R, id = 'cue') {
+  for (const e of res.timeline) {
+    if (e.kind !== 'rail' || !e.hit || e.hit.id !== id) continue;
+    const b = e.balls.find((x) => x.id === id);
+    if (!b) continue;
+    for (const r of cueRails) {
+      const tol = R + (r.rc || 0) + 0.4 * R;
+      const along = r.axis === 'x' ? b.pos.x : b.pos.y;
+      const perp = r.axis === 'x' ? b.pos.y : b.pos.x;
+      if (along >= r.span[0] - tol && along <= r.span[1] + tol && Math.abs(perp - r.perp) <= tol) return true;
+    }
+  }
   return false;
 }
 // A plant/combo: the cue's FIRST object-ball contact was NOT the ball that ended up potted.
@@ -317,7 +343,7 @@ function leapfrog() {
   ];
   return { id: 'leapfrog', name: 'The Leapfrog', table: 'pool',
     objective: 'A ball blocks the path — jump the cue over it and pot the 8 in the top-right.',
-    pieces, goal: (res) => potted(res, 'b8') && jumped(res) && cueSafe(res) };
+    pieces, goal: (res) => potted(res, 'b8') && leapt(res, g.R) && cueSafe(res) };
 }
 
 // "The Guardrail" — a cue stick laid across the table; bank the cue ball off it into the pocket.
@@ -336,7 +362,7 @@ function guardrail() {
       { id: 'b3', number: 3, color: '#c0241f', pos: { x: T.x, y: T.y } },
     ],
     rails: [rail],
-    goal: (res) => potted(res, 'b3') && bankedBeforeContact(res) && cueSafe(res) };
+    goal: (res) => potted(res, 'b3') && bankedOffCue(res, [rail], g.R) && cueSafe(res) };
 }
 
 // "The Alley" — two parallel cue sticks form a channel; fire the cue straight down it to pot the ball,
@@ -356,7 +382,7 @@ function alley() {
       { id: 'b7', number: 7, color: '#1f7a43', pos: { x: T.x, y: T.y } },
     ],
     rails,
-    goal: (res) => potted(res, 'b7') && cueSafe(res) };
+    goal: (res) => potted(res, 'b7') && bankedOffCue(res, rails, g.R) && cueSafe(res) };
 }
 
 // "The Double" — bank the OBJECT ball off a cushion and back across the table into a corner pocket.
@@ -469,7 +495,7 @@ function buildCandidate(table, goalType, difficulty, rng) {
     if (!inBounds(g, mid, 0.03)) return null;
     pieces.push({ id: 'blocker', number: 4 + Math.floor(rng() * 4), color: COLORS[Math.floor(rng() * COLORS.length)], pos: mid });
     level.objective = `Jump the cue over the blocker and pot the ball in the ${pocketName(g, pi)}.`;
-    level.goal = (res) => potted(res, 'target') && jumped(res) && cueSafe(res);
+    level.goal = (res) => potted(res, 'target') && leapt(res, g.R) && cueSafe(res);
   }
   return level;
 }

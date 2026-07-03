@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CURATED, CURATED_COUNT, getLevel, generateLevel, findSolution, runTrickShot,
-  tableGeom, cueRail, jumped, leapt, bankedOffCue, cueSafe, jumpSeed, ghost,
+  tableGeom, cueRail, jumped, leapt, bankedOffCue, cueSafe, cueNear, jumpSeed, ghost,
 } from '../src/trickshots.js';
 
 // A solution the searcher returns must, when actually played, meet the goal — no self-deception.
@@ -58,6 +58,22 @@ test('the analytic projectile seed jumps clean over the blocker (no elevation sw
   const res = runTrickShot(level, { angle: seed.angle, speed: seed.speed, spin: { side: 0, vert: 0 }, elevation: seed.elevation });
   assert.ok(jumped(res), 'the analytic seed did not go airborne');
   assert.notEqual(res.firstContact, 'blk', 'the analytic seed clipped the blocker instead of clearing it');
+});
+
+test('multi-ball shots pot N in one stroke; the "& Return" variants also bring the cue home', () => {
+  const cases = [['pot2', 2, false], ['pot3', 3, false], ['pot4', 4, false], ['pot2r', 2, true], ['pot3r', 3, true], ['pot4r', 4, true]];
+  for (const [id, n, ret] of cases) {
+    const level = CURATED.find((l) => l.id === id);
+    assert.ok(level, `missing curated level ${id}`);
+    const { res } = assertSolvable(level, id);
+    const pottedObjs = res.pocketed.filter((x) => x !== 'cue');
+    assert.equal(pottedObjs.length, n, `${id}: expected ${n} balls potted in one shot, got ${pottedObjs.length}`);
+    assert.ok(cueSafe(res), `${id}: the cue was pocketed`);
+    if (ret) {
+      const start = level.pieces.find((p) => p.id === 'cue').pos;
+      assert.ok(cueNear(res, start, 0.45), `${id}: the cue did not return near its start`);
+    }
+  }
 });
 
 test('"The Guardrail" banks off the laid CUE STICK specifically (not a cushion)', () => {

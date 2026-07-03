@@ -138,6 +138,13 @@ export function objectBanked(res, id) {
   return false;
 }
 
+// The cue came to rest within `tol` of `pos` (and wasn't potted) — used by "return the cue to its start"
+// enhanced levels, where the white must travel out, do its work, and screw/roll back home.
+export function cueNear(res, pos, tol, id = 'cue') {
+  const c = res.balls.find((b) => b.id === id);
+  return !!c && !c.pocketed && !c.cleared && Math.hypot(c.pos.x - pos.x, c.pos.y - pos.y) <= tol;
+}
+
 // --- running a shot on a level ---------------------------------------------------------------
 
 // Resolve one cue strike against a level's layout (table cushions + any cue-rails), rules-free.
@@ -237,7 +244,24 @@ function refine(level, goal, seedAim, { speeds = SPEEDS, spins = SPINS, elevs = 
   return null;
 }
 
+// A broad brute-force sweep (aim × speed × spin, optional elevation): finds shots the geometry-seeded
+// stages miss — multi-ball caroms, cue-return draws — where there's no single ghost line to aim at.
+// Expensive, so it's used to DISCOVER a curated level's solution once (baked into `level.solution`),
+// not at runtime. Returns the first shot whose result satisfies `goal`.
+export function broadSearch(level, goal, opts = {}) {
+  const { aimStep = Math.PI / 180, speeds = [3, 4, 5, 6, 7, 7.8], spins = [{ side: 0, vert: 0 }, { side: 0, vert: -0.5 }, { side: 0, vert: -0.85 }, { side: 0, vert: 0.6 }, { side: 0.5, vert: 0 }, { side: -0.5, vert: 0 }], elevs = [0] } = opts;
+  for (let a = 0; a < 2 * Math.PI; a += aimStep) {
+    for (const elevation of elevs) for (const speed of speeds) for (const spin of spins) {
+      const hit = tryShot(level, goal, a, speed, spin, elevation);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
 export function findSolution(level) {
+  // A curated level may ship its discovered stroke — verify and return it (keeps the demo instant).
+  if (level.solution) { const res = runTrickShot(level, level.solution); if (level.goal(res)) return level.solution; }
   const g = tableGeom(level.table);
   const C = cue(level.pieces);
   if (!C) return null;
@@ -407,7 +431,77 @@ function double() {
     goal: (res) => potted(res, 'b4') && objectBanked(res, 'b4') && cueSafe(res) };
 }
 
-export const CURATED = [sledgehammer(), leapfrog(), guardrail(), alley(), double()];
+// --- multi-ball pots (pot 2/3/4 in one stroke; "& Return" variants also screw the cue back home) -----
+// Discovered by broadSearch (see the dev exploration) and BAKED as `solution`, so the auto-demo stays
+// instant. Layouts and strokes are exact — findSolution's fast-path verifies the baked solution.
+const POOLP = POOL.pockets.map((p) => p.center);
+const POOLPR = POOL.pockets.map((p) => p.radius);
+const dirTo = (pk) => { const inx = -Math.sign(pk.x) || -1, iny = -Math.sign(pk.y) || -1; const l = Math.hypot(inx, iny); return { x: inx / l, y: iny / l }; };
+const perpU = (u) => ({ x: -u.y, y: u.x });
+const COLS = ['#e7c63b', '#2156b0', '#c0241f', '#6a3da8'];
+
+function multiPot({ id, name, objective, pieces, ids, cueStart, tol, solution }) {
+  const goal = cueStart
+    ? (res) => pottedAll(res, ids) && cueSafe(res) && cueNear(res, cueStart, tol)
+    : (res) => pottedAll(res, ids) && cueSafe(res);
+  return { id, name, table: 'pool', objective, pieces, rails: [], goal, solution };
+}
+const cuePiece = (x, y) => ({ id: 'cue', number: 0, color: '#f5f3ea', pos: { x, y } });
+
+// N balls stacked in a line running into pocket P (from `d0` out, spaced `gap`).
+function stackAt(P, n, d0, gap) {
+  const u = dirTo(P);
+  return Array.from({ length: n }, (_, i) => ({ id: `b${i + 1}`, number: i + 1, color: COLS[i], pos: { x: P.x + u.x * (d0 + i * gap), y: P.y + u.y * (d0 + i * gap) } }));
+}
+
+function pot2() {
+  const P = POOLP[3], u = dirTo(P);
+  return multiPot({ id: 'pot2', name: 'Double Pot', objective: 'Pot both balls into the top-right pocket with a single stroke.',
+    pieces: [cuePiece(-0.2, -0.1),
+      { id: 'b1', number: 1, color: COLS[0], pos: { x: P.x + u.x * 0.10, y: P.y + u.y * 0.10 } },
+      { id: 'b2', number: 2, color: COLS[1], pos: { x: P.x + u.x * (0.10 + 2 * RP + 0.004), y: P.y + u.y * (0.10 + 2 * RP + 0.004) } }],
+    ids: ['b1', 'b2'], solution: { angle: 0.140, speed: 7.8, spin: { side: 0, vert: 0.6 }, elevation: 0 } });
+}
+function pot3() {
+  return multiPot({ id: 'pot3', name: 'The Treble', objective: 'Sink all three balls in the top-right with one stroke.',
+    pieces: [cuePiece(-0.2, -0.1), ...stackAt(POOLP[3], 3, 0.09, 2 * RP + 0.003)],
+    ids: ['b1', 'b2', 'b3'], solution: { angle: 0.593, speed: 6, spin: { side: 0.5, vert: 0 }, elevation: 0 } });
+}
+function pot4() {
+  const P = POOLP[3], u = dirTo(P), pu = perpU(u), d = POOLPR[3] + 0.5 * RP, gap = 2 * RP + 0.0015;
+  const base = { x: P.x + u.x * d, y: P.y + u.y * d };
+  const off = [[0, 0], [1, 0.5], [1, -0.5], [2, 0]];
+  return multiPot({ id: 'pot4', name: 'The Four-Ball', objective: 'Clear all four balls into the top-right with a single stroke.',
+    pieces: [cuePiece(-0.15, -0.08), ...off.map(([a, b], i) => ({ id: `b${i + 1}`, number: i + 1, color: COLS[i], pos: { x: base.x + u.x * a * gap + pu.x * b * gap, y: base.y + u.y * a * gap + pu.y * b * gap } }))],
+    ids: ['b1', 'b2', 'b3', 'b4'], solution: { angle: 0.454, speed: 5, spin: { side: 0.4, vert: -0.4 }, elevation: 0 } });
+}
+function pot2r() {
+  const P = POOLP[3], u = dirTo(P), cs = { x: -0.2, y: -0.1 };
+  return multiPot({ id: 'pot2r', name: 'Double & Return', objective: 'Pot both balls AND screw the cue ball back to where it started.',
+    pieces: [cuePiece(cs.x, cs.y),
+      { id: 'b1', number: 1, color: COLS[0], pos: { x: P.x + u.x * 0.10, y: P.y + u.y * 0.10 } },
+      { id: 'b2', number: 2, color: COLS[1], pos: { x: P.x + u.x * (0.10 + 2 * RP + 0.004), y: P.y + u.y * (0.10 + 2 * RP + 0.004) } }],
+    ids: ['b1', 'b2'], cueStart: cs, tol: 0.22, solution: { angle: 0.3926990816987245, speed: 7, spin: { side: 0, vert: -0.75 }, elevation: 0 } });
+}
+function pot3r() {
+  const cs = { x: 0.35, y: 0.02 };
+  return multiPot({ id: 'pot3r', name: 'Treble & Return', objective: 'Sink all three AND bring the cue ball back to its start.',
+    pieces: [cuePiece(cs.x, cs.y), ...stackAt(POOLP[3], 3, POOLPR[3] + 0.3 * RP, 2 * RP + 0.002)],
+    ids: ['b1', 'b2', 'b3'], cueStart: cs, tol: 0.3, solution: { angle: 0.3054326190990079, speed: 7, spin: { side: -0.85, vert: -0.75 }, elevation: 0 } });
+}
+function pot4r() {
+  const Pm = POOLP[5], Pr = POOLP[3], um = dirTo(Pm), ur = dirTo(Pr), cs = { x: -0.5, y: 0.15 };
+  const dm = POOLPR[5] + 0.3 * RP, dr = POOLPR[3] + 0.3 * RP, gap = 2 * RP + 0.003;
+  return multiPot({ id: 'pot4r', name: 'Four-Ball & Return', objective: 'Clear all four AND draw the cue back toward its start.',
+    pieces: [cuePiece(cs.x, cs.y),
+      { id: 'b1', number: 1, color: COLS[0], pos: { x: Pm.x + um.x * dm, y: Pm.y + um.y * dm } },
+      { id: 'b2', number: 2, color: COLS[0], pos: { x: Pm.x + um.x * (dm + gap), y: Pm.y + um.y * (dm + gap) } },
+      { id: 'b3', number: 3, color: COLS[1], pos: { x: Pr.x + ur.x * dr, y: Pr.y + ur.y * dr } },
+      { id: 'b4', number: 4, color: COLS[1], pos: { x: Pr.x + ur.x * (dr + gap), y: Pr.y + ur.y * (dr + gap) } }],
+    ids: ['b1', 'b2', 'b3', 'b4'], cueStart: cs, tol: 0.40, solution: { angle: 0.3054326190990079, speed: 7.8, spin: { side: 0, vert: -0.6 }, elevation: 0 } });
+}
+
+export const CURATED = [sledgehammer(), leapfrog(), guardrail(), alley(), double(), pot2(), pot3(), pot4(), pot2r(), pot3r(), pot4r()];
 
 // --- procedural generation -------------------------------------------------------------------
 // Constructive, not random-and-pray: build a layout AROUND an intended shot type scaled by difficulty,

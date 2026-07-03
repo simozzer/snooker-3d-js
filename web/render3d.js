@@ -20,6 +20,7 @@ import { pool } from '../src/variants/pool.js';
 import { nineball } from '../src/variants/nineball.js';
 import { aiTurn, chooseShotFinish, difficultyConfig, executeShot } from '../src/ai.js';
 import { build147 } from '../src/exhibition.js';
+import { getLevel, runTrickShot, findSolution, CURATED_COUNT } from '../src/trickshots.js';
 import { buildPlanCache, replayState } from './replay.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
@@ -351,6 +352,7 @@ function mulberry32(seed) {
   return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 let game = null;
+let trick = null; // Trick Shots mode state: { index, level, awaiting, passed } — null when not in the mode
 let aiRng = mulberry32(1);
 let timeline = [];
 let planCache = null;
@@ -556,6 +558,7 @@ function samplePreview(res) {
 // Build the balls the way takeShot would (cue placed if the frame owes ball-in-hand), run a capped
 // non-committing sim of `shot`, and return the sampled paths. Pure prediction — never mutates game.
 function computePreviewPaths(shot, depth) {
+  if (trick && trick.level) return samplePreview(runTrickShot(trick.level, shot)); // include the cue-rails + full path
   const pieces = game.pieces.map((p) => ({ ...p, pos: { ...p.pos } }));
   if (shot.cuePlacement) {
     const cue = pieces.find((p) => p.id === 'cue');
@@ -642,9 +645,20 @@ el('trajectory').addEventListener('change', refreshHumanPreview);
 
 const aiEnabled = () => el('aimode').value !== 'human'; // 'off' human-vs-human, else vs AI / self-play
 const selfPlay = () => el('aimode').value === 'self';
-const difficulty = () => (selfPlay() ? 'deadly' : el('difficulty').value); // AI-vs-AI always plays at Deadly
-// Player 0 = you (unless self-play). Player 1 = AI (when AI is on).
-const isAiTurn = () => !game.frame.frameOver && (selfPlay() || (aiEnabled() && game.frame.turn === 1));
+const difficulty = () => (trick || selfPlay() ? 'deadly' : el('difficulty').value); // Trick Shots + AI-vs-AI always play at Deadly
+
+// Keep the DISPLAYED difficulty honest: AI-vs-AI is forced to Deadly, so show it as Deadly and lock the
+// control; restore the player's own pick when they leave self-play.
+let pickedDifficulty = el('difficulty').value;
+function syncDifficultyUI() {
+  const sel = el('difficulty');
+  if (selfPlay()) { if (!sel.disabled) pickedDifficulty = sel.value; sel.value = 'deadly'; sel.disabled = true; }
+  else if (sel.disabled) { sel.value = pickedDifficulty; sel.disabled = false; }
+}
+el('difficulty').addEventListener('change', () => { if (!selfPlay()) pickedDifficulty = el('difficulty').value; });
+syncDifficultyUI(); // reflect the initial opponent mode on load
+// Player 0 = you (unless self-play). Player 1 = AI (when AI is on). Trick Shots is always solo.
+const isAiTurn = () => !trick && !game.frame.frameOver && (selfPlay() || (aiEnabled() && game.frame.turn === 1));
 
 let playing = false;
 let simT = 0;
@@ -1006,7 +1020,9 @@ function endShotCam() {
 
 // The human's shot from the sliders (aim/power/spin/elevation). Ball-in-hand uses the default D spot.
 function humanShot() {
-  if (playing || isAiTurn() || game.frame.frameOver) return;
+  if (playing) return;
+  if (trick) { if (!trick.awaiting) playTrickShot(sliderShot()); return; }
+  if (isAiTurn() || game.frame.frameOver) return;
   playShot(sliderShot());
 }
 
@@ -1096,6 +1112,7 @@ function maybeAiTurn() {
 
 // Called once a shot's replay finishes: settle the meshes to the resolved layout, then hand off.
 function onReplayEnd() {
+  if (trick) { onTrickShotEnd(); return; } // Trick Shots: judge the goal, don't run game rules/AI
   syncBallMeshes(game.pieces); // authoritative resting positions from the rules reconciliation
   updateScore();
   if (game.frame.frameOver) {
@@ -1131,8 +1148,15 @@ function setVariant(v) {
 
 el('play').addEventListener('click', humanShot);
 el('newframe').addEventListener('click', newFrameGame);
-el('aimode').addEventListener('change', () => { updateScore(); maybeAiTurn(); refreshHumanPreview(); });
-el('game').addEventListener('change', () => setVariant(VARIANTS[el('game').value] ?? snooker));
+el('aimode').addEventListener('change', () => { syncDifficultyUI(); updateScore(); maybeAiTurn(); refreshHumanPreview(); });
+el('game').addEventListener('change', () => {
+  const v = el('game').value;
+  if (v === 'trickshots') startTrickShots();
+  else { exitTrickShots(); setVariant(VARIANTS[v] ?? snooker); }
+});
+el('trick-retry').addEventListener('click', () => loadTrickLevel(trick ? trick.index : 0));
+el('trick-next').addEventListener('click', () => { if (trick) loadTrickLevel(trick.index + 1); });
+el('trick-show').addEventListener('click', showTrickSolution);
 
 // --- aiming: click the table, or fine-tune with buttons / arrow keys --------------------------
 // A click on the bed raycasts to the table plane and aims the cue ball at that point; a drag is left
@@ -1363,6 +1387,145 @@ async function startExhibition(record) {
   playExhibitionStep();
 }
 el('rec147').addEventListener('click', () => { startExhibition(true); });
+
+// --- Trick Shots mode ------------------------------------------------------------------------
+// A solo, level-based challenge (src/trickshots.js): each level is a fixed layout + a machine-checkable
+// goal, with NO game rules — every shot is legal, jump shots included. Curated famous shots come first
+// (one uses a laid cue stick as a rail), then endless generated levels of rising difficulty. We reuse
+// the human aim/power/spin/jump UI and the shot-cam + pot-replay; only the resolve path differs (the
+// rules-free runTrickShot), and the goal is judged when the shot settles.
+let trickSeed = 20260701; // varies generated layouts run to run (fixed here for reproducibility)
+const trickRailGroup = new THREE.Group();
+scene.add(trickRailGroup);
+
+function setTrickUI(on) {
+  el('trickpanel').style.display = on ? 'block' : 'none';
+  for (const id of ['row-opponent', 'row-difficulty', 'newframe', 'rec147', 'scores']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
+}
+
+// Draw the level's cue-stick rails as thin cylinders lying on the bed (a real cue used as a rail).
+function syncTrickRails(level) {
+  for (const c of [...trickRailGroup.children]) { trickRailGroup.remove(c); c.geometry?.dispose?.(); }
+  for (const r of level.rails ?? []) {
+    const [lo, hi] = r.span;
+    const len = (hi - lo) * S;
+    const mid = ((lo + hi) / 2) * S;
+    const shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008 * S, 0.013 * S, len, 14),
+      new THREE.MeshStandardMaterial({ color: 0xcaa062, roughness: 0.5 }),
+    );
+    shaft.castShadow = true;
+    const y = R * S * 0.9;
+    if (r.axis === 'x') { shaft.rotation.z = Math.PI / 2; shaft.position.set(mid, y, r.perp * S); }
+    else { shaft.rotation.x = Math.PI / 2; shaft.position.set(r.perp * S, y, mid); }
+    trickRailGroup.add(shaft);
+  }
+}
+
+function startTrickShots() {
+  playing = false;
+  endReplay();
+  endShotCam();
+  pauseThen = null; pauseUntil = 0;
+  aiLineup = null;
+  exhibition = null;
+  trick = { index: 0, level: null, awaiting: false, passed: false };
+  setTrickUI(true);
+  loadTrickLevel(0);
+}
+
+function exitTrickShots() {
+  if (!trick) return;
+  trick = null;
+  setTrickUI(false);
+  for (const c of [...trickRailGroup.children]) { trickRailGroup.remove(c); c.geometry?.dispose?.(); }
+}
+
+// Load (and, past the curated set, GENERATE) level `index`. Generation runs a short engine search, so
+// yield a frame to paint "Generating…" first. Rebuilds the table if the level uses a different one.
+async function loadTrickLevel(index) {
+  if (!trick) return;
+  playing = false;
+  endReplay();
+  endShotCam();
+  pauseThen = null; pauseUntil = 0;
+  trick.awaiting = false;
+  trick.passed = false;
+  el('trick-result').textContent = '';
+  el('trick-result').style.color = '#a8b6c4';
+  el('trick-next').disabled = true;
+  clearPreview();
+  if (index >= CURATED_COUNT) { status.textContent = 'Generating trick shot…'; el('trick-objective').textContent = 'Generating…'; await new Promise((r) => setTimeout(r, 0)); }
+  const level = getLevel(index, trickSeed);
+  if (!level) { status.textContent = 'Could not generate a level — try Retry.'; return; }
+  trick.index = index;
+  trick.level = level;
+
+  // per-level table geometry (currently always pool; the level.table hook keeps others open)
+  const v = VARIANTS[level.table] ?? pool;
+  if (v !== variant) { variant = v; applyVariantGeom(); rebuildTable(); }
+  frameCamera();
+  // lightweight game object so the existing aim / preview / spin-pad / cue-lift code all just work
+  game = { variant: v, pieces: level.pieces.map((p) => ({ ...p, pos: { ...p.pos } })), frame: { ballInHand: false, frameOver: false, turn: 0, message: '' } };
+  for (const [, m] of ballMeshes) scene.remove(m.grp);
+  ballMeshes.clear();
+  orient.clear();
+  syncBallMeshes(game.pieces);
+  syncTrickRails(level);
+  timeline = [];
+  const h1 = document.querySelector('#panel h1');
+  if (h1) h1.textContent = 'TRICK SHOTS · 3D';
+  el('trick-name').textContent = level.name ?? `Level ${index + 1}`;
+  el('trick-level').textContent = index < CURATED_COUNT ? `Famous · ${index + 1}/${CURATED_COUNT}` : `Level ${index + 1}`;
+  el('trick-objective').textContent = level.objective ?? '';
+  status.textContent = 'Line up your shot, then Play.';
+  resetHumanControls();
+  setAim(lastAngle ? (lastAngle * 180) / Math.PI : 0);
+  refreshHumanPreview();
+}
+
+// Resolve a trick shot rules-free (table cushions + the level's cue-rails), then play it back through
+// the same shot-cam + replay pipeline as a live shot. The goal is judged when it settles (onReplayEnd).
+function playTrickShot(shot) {
+  if (playing || !trick || !trick.level) return;
+  clearPreview();
+  const res = runTrickShot(trick.level, shot);
+  trick.lastRes = res;
+  trick.awaiting = true;
+  timeline = res.timeline;
+  planCache = buildPlanCache(timeline, R);
+  endT = timeline.length ? timeline[timeline.length - 1].t : 0;
+  lastAngle = shot.angle;
+  lastPots = pottedObjectBalls(timeline);
+  simT = 0; soundIdx = 0;
+  playing = true;
+  lastFrame = performance.now();
+  status.textContent = '';
+  beginShotCam(shot);
+}
+
+// Shot settled → judge the goal, show the verdict, and gate the Next button.
+function onTrickShotEnd() {
+  trick.awaiting = false;
+  const res = trick.lastRes;
+  const passed = res && trick.level.goal(res);
+  trick.passed = passed;
+  const r = el('trick-result');
+  if (passed) { r.textContent = '✓ Shot made!'; r.style.color = '#54c98a'; el('trick-next').disabled = false; status.textContent = 'Nice! Next ▶ for the next level.'; }
+  else { r.textContent = '✗ Not this time — ↺ Retry.'; r.style.color = '#e08a6a'; status.textContent = 'Missed the goal. Retry, or Show me the solution.'; }
+}
+
+// Play a known winning stroke (the stored solution, or one searched on demand) as a demo.
+function showTrickSolution() {
+  if (!trick || !trick.level || playing) return;
+  const sol = trick.level.solution || findSolution(trick.level);
+  if (!sol) { status.textContent = 'No solution found to show.'; return; }
+  resetHumanControls();
+  setAim((sol.angle * 180) / Math.PI);
+  sliders.power.value = String(Math.min(+sol.speed.toFixed(2), MAX_SPEED));
+  refreshLabels();
+  playTrickShot(sol);
+}
 
 function frame(now) {
   const dt = Math.min((now - lastFrame) / 1000, 0.05);

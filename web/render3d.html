@@ -68,16 +68,30 @@
             <option value="snooker" selected>Snooker</option>
             <option value="pool">8-Ball Pool</option>
             <option value="nineball">9-Ball Pool</option>
+            <option value="trickshots">Trick Shots</option>
           </select>
         </div>
-        <div class="ctl"><label>Opponent</label>
+        <div id="trickpanel" style="display:none; border:1px solid #33404c; border-radius:8px; padding:10px; background:#151b21;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline;">
+            <strong id="trick-name" style="color:#cfe0ee; font-size:14px;">Trick Shots</strong>
+            <span id="trick-level" style="font-size:11px; color:#8fa3b5;"></span>
+          </div>
+          <div id="trick-objective" style="font-size:12px; color:#a8b6c4; margin:6px 0; line-height:1.4;"></div>
+          <div id="trick-result" style="font-size:13px; font-weight:600; min-height:18px; margin-bottom:8px;"></div>
+          <div style="display:flex; gap:6px;">
+            <button id="trick-retry" class="sec" style="flex:1; padding:7px;">↺ Retry</button>
+            <button id="trick-show" class="sec" style="flex:1; padding:7px;">Show me</button>
+            <button id="trick-next" style="flex:1; padding:7px;" disabled>Next ▶</button>
+          </div>
+        </div>
+        <div class="ctl" id="row-opponent"><label>Opponent</label>
           <select id="aimode">
             <option value="ai" selected>You vs AI</option>
             <option value="human">Two players (hot-seat)</option>
             <option value="self">Watch AI vs AI</option>
           </select>
         </div>
-        <div class="ctl"><label>AI difficulty</label>
+        <div class="ctl" id="row-difficulty"><label>AI difficulty</label>
           <select id="difficulty"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option><option value="deadly">Deadly</option></select>
         </div>
         <div class="ctl"><label>Aim<span id="v-angle"></span></label>

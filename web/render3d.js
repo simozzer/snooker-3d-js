@@ -1115,6 +1115,30 @@ function endShotCam() {
   controls.enabled = true;
 }
 
+// Over-the-shoulder AIM view (the "Cue-ball view" toggle, while a human is lining up): sit behind the
+// cue ball looking down the current aim line, so the view rotates with your aim. Uses the SAME geometry
+// as the cueing camera (beginShotCam) so striking the shot is a seamless hand-off. Eased, and orbit is
+// suspended while it's active (toggle off to free-orbit). Not for AI turns / replays / exhibition.
+const aimCam = { pos: new THREE.Vector3(), tgt: new THREE.Vector3(), init: false };
+function aimView() {
+  return pinCue() && game && !playing && !replaying && !exhibition && !shotCam && !game.frame.frameOver && !isAiTurn();
+}
+function driveAimCam(dt) {
+  const c = cueBallPos();
+  const Cw = P3(c.x, c.y, R);
+  const aim = (aimDeg * Math.PI) / 180;
+  const aimW = new THREE.Vector3(Math.cos(aim), 0, Math.sin(aim));
+  const up = new THREE.Vector3(0, 1, 0);
+  const lift = cueLift(c.x, c.y, aim); // match the cueing camera's rise when the cue is forced up
+  const dPos = Cw.clone().addScaledVector(aimW, -(CUE_LEN + 0.5) * S).addScaledVector(up, (0.82 + 1.1 * Math.sin(lift)) * S);
+  const dTgt = Cw.clone().addScaledVector(aimW, 1.5 * S); dTgt.y = 0.1 * S; // low, down the aim line
+  if (!aimCam.init) { aimCam.pos.copy(camera.position); aimCam.tgt.copy(controls.target); aimCam.init = true; } // ease in from the current view
+  aimCam.pos.lerp(dPos, 1 - Math.exp(-dt / 0.22));
+  aimCam.tgt.lerp(dTgt, 1 - Math.exp(-dt / 0.18));
+  camera.position.copy(aimCam.pos);
+  camera.lookAt(aimCam.tgt);
+}
+
 // The human's shot from the sliders (aim/power/spin/elevation). Ball-in-hand uses the default D spot.
 function humanShot() {
   if (playing) return;
@@ -1748,10 +1772,17 @@ function frame(now) {
     if (then === 'replay') startReplay();
     else { endReplay(); onReplayEnd(); }
   }
-  if (!replaying && !exhibition && !shotCam) {
-    // "Center view on cue ball": ease the orbit target onto the white so you rotate/zoom around it.
-    if (pinCue() && game) { const c = cueBallPos(); controls.target.lerp(P3(c.x, c.y, R), 0.25); }
-    controls.update(); // don't fight the replay / exhibition / cueing camera
+  if (aimView()) {
+    controls.enabled = false; // over-the-shoulder aim view drives the camera directly
+    driveAimCam(dt);
+  } else {
+    aimCam.init = false; // ease in again when aiming next resumes
+    if (!replaying && !exhibition && !shotCam) { // don't fight the replay / exhibition / cueing camera
+      // "Cue-ball view" while just watching (AI turn etc.): keep the orbit centred on the white.
+      if (pinCue() && game) { const c = cueBallPos(); controls.target.lerp(P3(c.x, c.y, R), 0.25); }
+      controls.enabled = true;
+      controls.update();
+    }
   }
   updateNets(now); // swing any pocket net that a ball has just dropped into
   renderer.render(scene, camera);

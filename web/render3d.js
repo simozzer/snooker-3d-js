@@ -657,6 +657,33 @@ function syncDifficultyUI() {
 }
 el('difficulty').addEventListener('change', () => { if (!selfPlay()) pickedDifficulty = el('difficulty').value; });
 syncDifficultyUI(); // reflect the initial opponent mode on load
+
+// Collapsible "How to play & rules", populated per game type. The variants carry their own rulesText;
+// the controls how-to is shared, and Trick Shots gets its own (no fouls/turns, jump shots, cue-rails).
+const CONTROLS_HOWTO = [
+  'Aim by clicking the table where you want to hit, or fine-tune with ◀ ▶ / the ← → keys.',
+  'Power sets the shot speed. On the Cue ball pad, drag the inner disc for side (english) and follow / draw; drag the outer ring to lift the cue for a jump shot.',
+  'Press “Play your shot” to strike. Drag to orbit the view, scroll to zoom.',
+];
+const TRICK_HOWTO = [
+  'Every level shows an objective at the top — line up aim / power / spin / jump, then Play.',
+  'Anything goes: all shots are legal and jump shots count. Some levels lay a cue stick on the table as a rail to bank off.',
+  '↺ Retry resets the layout · “Show me” plays a winning solution · “Next ▶” unlocks once you make the shot.',
+];
+const TRICK_RULES = [
+  'No fouls and no turns — just complete the objective to clear the level.',
+  'The famous trick shots come first, then endless generated levels of rising difficulty.',
+];
+const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function updateRulesPanel() {
+  const title = trick ? 'Trick Shots' : (variant.name ?? 'Game');
+  const howTo = trick ? TRICK_HOWTO : CONTROLS_HOWTO;
+  const rules = trick ? TRICK_RULES : (variant.rulesText ?? []);
+  el('rules-summary').textContent = `How to play & rules — ${title}`;
+  const sec = (h, items) => (items.length ? `<h4>${h}</h4><ul>${items.map((t) => `<li>${escHtml(t)}</li>`).join('')}</ul>` : '');
+  el('rules-body').innerHTML = sec('How to play', howTo) + sec('Rules', rules);
+}
+updateRulesPanel(); // initial (snooker)
 // Player 0 = you (unless self-play). Player 1 = AI (when AI is on). Trick Shots is always solo.
 const isAiTurn = () => !trick && !game.frame.frameOver && (selfPlay() || (aiEnabled() && game.frame.turn === 1));
 
@@ -1143,6 +1170,7 @@ function setVariant(v) {
   orient.clear();
   const h1 = document.querySelector('#panel h1');
   if (h1) h1.textContent = `${variant.name ?? 'SNOOKER'} · 3D`;
+  updateRulesPanel();
   newFrameGame();
 }
 
@@ -1431,6 +1459,7 @@ function startTrickShots() {
   exhibition = null;
   trick = { index: 0, level: null, awaiting: false, passed: false };
   setTrickUI(true);
+  updateRulesPanel();
   loadTrickLevel(0);
 }
 

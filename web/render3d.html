@@ -45,6 +45,16 @@
         color: #e6edf3; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
       @keyframes replaypulse { 0%,100% { opacity: 1; } 50% { opacity: .2; } }
       @keyframes replaypop { from { transform: translateX(-50%) scale(.7); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
+      /* collapsible how-to-play / rules */
+      details#rules { border: 1px solid #33404c; border-radius: 8px; background: #151b21; }
+      details#rules > summary { list-style: none; cursor: pointer; padding: 9px 12px; font-size: 13px; font-weight: 600; color: #cfe0ee; user-select: none; }
+      details#rules > summary::-webkit-details-marker { display: none; }
+      details#rules > summary::before { content: '▸ '; color: #7f93a5; }
+      details#rules[open] > summary::before { content: '▾ '; }
+      details#rules .rbody { padding: 0 12px 12px; }
+      details#rules h4 { margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: #7f93a5; }
+      details#rules ul { margin: 0; padding-left: 16px; }
+      details#rules li { font-size: 12px; color: #a8b6c4; line-height: 1.45; margin-bottom: 4px; }
     </style>
   </head>
   <body>
@@ -121,6 +131,10 @@
         <label class="chk"><input type="checkbox" id="replays" checked /> Pot replays (press any key to skip)</label>
         <div id="status"></div>
         <div class="hint">Set aim / power / spin, then Play your shot; the AI replies automatically. Drag to orbit · scroll to zoom. A ball that leaps the cushion leaves play; an aligned pot drops.</div>
+        <details id="rules">
+          <summary id="rules-summary">How to play &amp; rules</summary>
+          <div class="rbody" id="rules-body"></div>
+        </details>
       </div>
     </div>
     <script type="importmap">

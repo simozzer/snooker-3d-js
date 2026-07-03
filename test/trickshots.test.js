@@ -24,12 +24,13 @@ test('every curated famous shot is solvable, and its solution really wins', () =
   for (const level of CURATED) assertSolvable(level, `curated "${level.name}"`);
 });
 
-test('"The Leapfrog" is a REAL jump — the cue clears a ball height, not a cushion hop', () => {
+test('"The Leapfrog" leaps cleanly OVER the blocker (never touches it), then pots the 8', () => {
   const g = tableGeom('pool');
   const level = CURATED.find((l) => l.id === 'leapfrog');
   const { res, sol } = assertSolvable(level, 'leapfrog');
   assert.ok(leapt(res, g.R), 'the winning stroke did not rise to a real jump height');
   assert.ok((sol.elevation || 0) > 0.1, `expected an elevated cue, got elevation ${sol.elevation}`);
+  assert.ok(!res.cueContacts.includes('blk'), `the cue collided with the blocker: contacts ${JSON.stringify(res.cueContacts)}`);
 });
 
 test('the analytic projectile seed jumps clean over the blocker (no elevation sweep)', () => {

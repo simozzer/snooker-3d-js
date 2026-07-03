@@ -77,6 +77,8 @@ export function pocketName(g, index) {
 export const potted = (res, id) => res.pocketed.includes(id);
 export const pottedAll = (res, ids) => ids.every((id) => res.pocketed.includes(id));
 export const cueSafe = (res) => !res.pocketed.includes('cue') && !res.cleared.includes('cue');
+// The cue never touched `id` — used so a jump must clear a blocker cleanly, not carom off it.
+export const clears = (res, id) => !res.cueContacts.includes(id);
 
 // Which pocket a given ball dropped into (by index into the table's pocket list), or -1.
 export function pottedIntoIndex(res, id) {
@@ -95,7 +97,7 @@ export function jumped(res, id = 'cue') {
 export function leapt(res, R, id = 'cue') {
   let maxZ = 0;
   for (const e of res.timeline) { const b = e.balls.find((x) => x.id === id); if (b && b.pos.z > maxZ) maxZ = b.pos.z; }
-  return maxZ >= 2.4 * R;
+  return maxZ >= 3 * R; // centre a full ball-diameter above the bed → cleanly OVER a blocking ball, not a hop/dodge
 }
 // Did the cue bank off one of the LAID CUE STICKS (not a table cushion)? At a rail-contact event the
 // ball centre sits ~R+rc from the rail axis; check that point lies on a cue-stick segment. This lets a
@@ -203,7 +205,7 @@ export function jumpSeed(geom, C, G, pieces, targetId) {
   const D = Math.hypot(dxg, dyg);
   if (D < 3 * geom.R) return null;
   const ux = dxg / D, uy = dyg / D;
-  const hNeed = 2 * geom.R + 0.006; // cue centre must clear a blocker centre by 2R (+ a small margin)
+  const hNeed = 2.5 * geom.R; // clear the blocker centre by 2.5R (0.5R margin over the 2R touch distance)
   let tanE = 0;
   for (const p of pieces) {
     if (p.id === 'cue' || p.id === targetId) continue;
@@ -257,8 +259,10 @@ export function findSolution(level) {
     if (!ln.gh) continue;
     const js = jumpSeed(g, C.pos, ln.gh, level.pieces, ln.T.id);
     if (!js) continue;
-    const speeds = [0.8, 0.92, 1, 1.15, 1.32].map((k) => clampSpeed(js.speed * k));
-    const elevs = [0.9, 1, 1.12].map((k) => Math.min(js.elevation * k, MAX_JUMP_ELEV));
+    // keep speed near the seed (big changes move the landing / lower the arc into the blocker) and never
+    // drop elevation below the seed — a lower arc is exactly what clips the ball we're jumping.
+    const speeds = [0.9, 1, 1.1, 1.22].map((k) => clampSpeed(js.speed * k));
+    const elevs = [1, 1.12, 1.28].map((k) => Math.min(js.elevation * k, MAX_JUMP_ELEV));
     const hit = refine(level, goal, js.angle, { speeds, spins: [{ side: 0, vert: 0 }, { side: 0, vert: 0.3 }], elevs });
     if (hit) return hit;
   }
@@ -329,21 +333,25 @@ function sledgehammer() {
     pieces, goal: (res) => potted(res, 'b1') && cueSafe(res) };
 }
 
-// "The Leapfrog" — a blocker ball sits square on the line to the object ball; jump the cue over it.
+// "The Leapfrog" — a blocker ball sits CLOSE in front of the cue; jump steeply over it and drop onto
+// the 8. Placing the blocker near the cue forces a tall, obvious arc (not a low hop or a sideways dodge).
 function leapfrog() {
   const g = POOL;
   const P = g.pockets[3].center; // top-right
-  const T = { x: P.x - 0.24, y: P.y - 0.18 };
-  const C = { x: T.x - 0.9, y: T.y - 0.34 };
-  const mid = { x: (C.x + T.x) / 2, y: (C.y + T.y) / 2 }; // blocker dead on the aim line
+  const T = { x: P.x - 0.30, y: P.y - 0.22 }; // the 8, with a clear line to the pocket
+  const C = { x: T.x - 0.95, y: T.y - 0.30 };
+  const gh = ghost({ pos: T }, { center: P }, g.R);
+  const d = Math.hypot(gh.x - C.x, gh.y - C.y);
+  const u = { x: (gh.x - C.x) / d, y: (gh.y - C.y) / d };
+  const blk = { x: C.x + u.x * 0.26, y: C.y + u.y * 0.26 }; // ~0.26 m ahead of the cue, dead on the line
   const pieces = [
     { id: 'cue', color: '#f5f3ea', pos: C },
     { id: 'b8', number: 8, color: '#1a1a1a', pos: { x: T.x, y: T.y } },
-    { id: 'blk', number: 5, color: '#e07b1a', pos: mid },
+    { id: 'blk', number: 5, color: '#e07b1a', pos: blk },
   ];
   return { id: 'leapfrog', name: 'The Leapfrog', table: 'pool',
     objective: 'A ball blocks the path — jump the cue over it and pot the 8 in the top-right.',
-    pieces, goal: (res) => potted(res, 'b8') && leapt(res, g.R) && cueSafe(res) };
+    pieces, goal: (res) => potted(res, 'b8') && leapt(res, g.R) && clears(res, 'blk') && cueSafe(res) };
 }
 
 // "The Guardrail" — a cue stick laid across the table; bank the cue ball off it into the pocket.
@@ -489,13 +497,17 @@ function buildCandidate(table, goalType, difficulty, rng) {
     level.objective = `A plant — strike the near ball to pot the far one in the ${pocketName(g, pi)}.`;
     level.goal = (res) => potted(res, 'target') && cueSafe(res);
   } else if (goalType === 'jump') {
-    // a blocker square on the cue→ghost line forces a jump over it
-    const mid = { x: (C.x + gh.x) / 2, y: (C.y + gh.y) / 2 };
-    if (pieces.some((q) => q.id !== 'cue' && dist(q.pos, mid) < 2.2 * g.R)) return null;
-    if (!inBounds(g, mid, 0.03)) return null;
-    pieces.push({ id: 'blocker', number: 4 + Math.floor(rng() * 4), color: COLORS[Math.floor(rng() * COLORS.length)], pos: mid });
+    // a blocker CLOSE in front of the cue on the aim line → a steep, tall jump clears it (a mid-line
+    // blocker only needs a low hop, which reads as a dodge rather than a leap)
+    const du = Math.hypot(gh.x - C.x, gh.y - C.y);
+    const u = { x: (gh.x - C.x) / du, y: (gh.y - C.y) / du };
+    const bd = Math.min(0.3, du * 0.32);
+    const blk = { x: C.x + u.x * bd, y: C.y + u.y * bd };
+    if (pieces.some((q) => q.id !== 'cue' && dist(q.pos, blk) < 2.2 * g.R)) return null;
+    if (!inBounds(g, blk, 0.03)) return null;
+    pieces.push({ id: 'blocker', number: 4 + Math.floor(rng() * 4), color: COLORS[Math.floor(rng() * COLORS.length)], pos: blk });
     level.objective = `Jump the cue over the blocker and pot the ball in the ${pocketName(g, pi)}.`;
-    level.goal = (res) => potted(res, 'target') && leapt(res, g.R) && cueSafe(res);
+    level.goal = (res) => potted(res, 'target') && leapt(res, g.R) && clears(res, 'blocker') && cueSafe(res);
   }
   return level;
 }

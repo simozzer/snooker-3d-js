@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CURATED, CURATED_COUNT, getLevel, generateLevel, findSolution, runTrickShot,
-  tableGeom, cueRail, jumped, bankedBeforeContact, cueSafe,
+  tableGeom, cueRail, jumped, bankedBeforeContact, cueSafe, jumpSeed, ghost,
 } from '../src/trickshots.js';
 
 // A solution the searcher returns must, when actually played, meet the goal — no self-deception.
@@ -28,6 +28,33 @@ test('"The Leapfrog" is genuinely a jump shot (cue goes airborne)', () => {
   const level = CURATED.find((l) => l.id === 'leapfrog');
   const { res } = assertSolvable(level, 'leapfrog');
   assert.ok(jumped(res), 'the winning stroke never left the bed — not a jump');
+});
+
+test('the analytic projectile seed jumps clean over the blocker (no elevation sweep)', () => {
+  const g = tableGeom('pool');
+  // cue, a target with a clear pocket line, and a blocker planted dead on the cue→ghost line
+  const P = g.pockets[3].center; // top-right
+  const T = { x: P.x - 0.24, y: P.y - 0.18 };
+  const C = { x: T.x - 0.9, y: T.y - 0.34 };
+  const gh = ghost({ pos: T }, { center: P }, g.R);
+  const mid = { x: (C.x + gh.x) / 2, y: (C.y + gh.y) / 2 };
+  const pieces = [
+    { id: 'cue', color: '#fff', pos: C },
+    { id: 'target', color: '#c0241f', pos: T },
+    { id: 'blk', color: '#e07b1a', pos: mid },
+  ];
+  const level = { table: 'pool', pieces, goal: () => true };
+
+  const seed = jumpSeed(g, C, gh, pieces, 'target');
+  assert.ok(seed, 'jumpSeed found no blocker to clear');
+  assert.ok(seed.elevation > 0.1 && seed.elevation <= Math.PI / 3, `elevation out of range: ${seed.elevation}`);
+  assert.ok(seed.speed > 0.5 && seed.speed <= 8, `speed out of range: ${seed.speed}`);
+
+  // Playing the raw analytic seed must leave the bed AND not clip the blocker — i.e. the parabola
+  // clears it and the cue's first contact is the target, purely from the closed-form solve.
+  const res = runTrickShot(level, { angle: seed.angle, speed: seed.speed, spin: { side: 0, vert: 0 }, elevation: seed.elevation });
+  assert.ok(jumped(res), 'the analytic seed did not go airborne');
+  assert.notEqual(res.firstContact, 'blk', 'the analytic seed clipped the blocker instead of clearing it');
 });
 
 test('"The Guardrail" genuinely banks off the laid cue stick before contact', () => {

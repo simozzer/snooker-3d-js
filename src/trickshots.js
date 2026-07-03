@@ -18,7 +18,7 @@ import { simulate } from './simulate.js';
 import { railCylinders } from './table.js';
 import { snooker } from './variants/snooker.js';
 import { pool } from './variants/pool.js';
-import { MAX_SPEED } from './snooker.js';
+import { MAX_SPEED, GRAVITY } from './snooker.js';
 
 const TABLES = { snooker, pool };
 const clampSpeed = (s) => Math.min(MAX_SPEED, Math.max(0.3, s));
@@ -133,13 +133,13 @@ export function runTrickShot(level, shot) {
 
 const SPEEDS = [2.4, 3.1, 4.0, 5.2, 6.4];
 const SPINS = [{ side: 0, vert: 0 }, { side: 0, vert: 0.5 }, { side: 0, vert: -0.4 }, { side: 0.35, vert: 0 }, { side: -0.35, vert: 0 }];
-const ELEVS = [0.42, 0.6, 0.78, 0.92];
+const MAX_JUMP_ELEV = Math.PI / 3; // 60°, matching the renderer's human cue-lift cap
 
 const cue = (pieces) => pieces.find((p) => p.id === 'cue');
 const objects = (pieces) => pieces.filter((p) => p.id !== 'cue');
 
 // Ghost-ball contact point: where the cue's centre must be at impact to send T toward pocket P.
-function ghost(T, P, R) {
+export function ghost(T, P, R) {
   const d = dist(T.pos, P.center);
   if (d < 1e-6) return null;
   const u = { x: (P.center.x - T.pos.x) / d, y: (P.center.y - T.pos.y) / d };
@@ -163,6 +163,35 @@ function openLines(g, pieces) {
 function tryShot(level, goal, angle, speed, spin, elevation) {
   const res = runTrickShot(level, { angle, speed, spin, elevation });
   return goal(res) ? { angle, speed, spin, elevation } : null;
+}
+
+// Analytic jump seed: a blocker on the cue→ghost line forces a leap. An elevated strike launches the
+// cue as a projectile p(t) = P + V·t + ½g·t² with V = speed·(cosE·aim, sinE) — a parabola (engine.strike
+// / motion FLIGHT). For a shot that lands back at bed level a horizontal distance D away (range =
+// speed²·sin2E / g), the arc height at along-line distance x is h(x) = tanE · x·(D−x)/D. So the elevation
+// that just clears a blocker of required height hNeed at distance `along` is tanE = hNeed·D / (along·(D−along)),
+// and the speed follows from the range. We take the tallest-required blocker, add a little margin, and
+// return {angle, speed, elevation} to seed the search — no elevation sweep needed. null if nothing blocks.
+export function jumpSeed(geom, C, G, pieces, targetId) {
+  const dxg = G.x - C.x, dyg = G.y - C.y;
+  const D = Math.hypot(dxg, dyg);
+  if (D < 3 * geom.R) return null;
+  const ux = dxg / D, uy = dyg / D;
+  const hNeed = 2 * geom.R + 0.006; // cue centre must clear a blocker centre by 2R (+ a small margin)
+  let tanE = 0;
+  for (const p of pieces) {
+    if (p.id === 'cue' || p.id === targetId) continue;
+    const dx = p.pos.x - C.x, dy = p.pos.y - C.y;
+    const along = dx * ux + dy * uy;          // projection onto the aim line
+    const lat = Math.abs(-dx * uy + dy * ux); // perpendicular distance from the line
+    if (along <= geom.R || along >= D || lat >= 2 * geom.R) continue; // not in the flight corridor
+    const need = (hNeed * D) / (along * (D - along)); // tanE to clear this ball (parabola landing at D)
+    if (need > tanE) tanE = need;
+  }
+  if (tanE <= 0) return null; // clear line — no jump required
+  const E = Math.min(Math.atan(tanE * 1.12), MAX_JUMP_ELEV); // a touch over the minimum, capped at 60°
+  const speed = clampSpeed(Math.sqrt((GRAVITY * D) / Math.sin(2 * E)));
+  return { angle: Math.atan2(dyg, dxg), speed, elevation: E };
 }
 
 // Refine around a seed aim: a few sub-degree nudges × the speed/spin menu (or a fixed set).
@@ -195,17 +224,16 @@ export function findSolution(level) {
     if (hit) return hit;
   }
 
-  // Stage B — jump: same aims, lifted cue (leapfrog a blocker sitting on the direct line).
+  // Stage B — jump (ANALYTIC): solve the projectile that clears the blocker(s) on the cue→ghost line
+  // and lands at the ghost, then seed the search there. Speed multipliers < 1 land the ball short so it
+  // rolls into contact (the bed bounce is damped); elevation nudges absorb the seed's approximations.
   for (const ln of lines) {
     if (!ln.gh) continue;
-    const seed = Math.atan2(ln.gh.y - C.pos.y, ln.gh.x - C.pos.x);
-    const hit = refine(level, goal, seed, { spins: [{ side: 0, vert: 0.4 }], elevs: ELEVS });
-    if (hit) return hit;
-  }
-  // Stage B′ — jump straight at a target (no pocket line needed; e.g. land-and-pot into a nearby bag).
-  for (const T of objects(level.pieces)) {
-    const seed = Math.atan2(T.pos.y - C.pos.y, T.pos.x - C.pos.x);
-    const hit = refine(level, goal, seed, { spins: [{ side: 0, vert: 0.4 }], elevs: ELEVS });
+    const js = jumpSeed(g, C.pos, ln.gh, level.pieces, ln.T.id);
+    if (!js) continue;
+    const speeds = [0.8, 0.92, 1, 1.15, 1.32].map((k) => clampSpeed(js.speed * k));
+    const elevs = [0.9, 1, 1.12].map((k) => Math.min(js.elevation * k, MAX_JUMP_ELEV));
+    const hit = refine(level, goal, js.angle, { speeds, spins: [{ side: 0, vert: 0 }, { side: 0, vert: 0.3 }], elevs });
     if (hit) return hit;
   }
 

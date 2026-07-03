@@ -1447,7 +1447,10 @@ function armTrickAuto(index) {
 
 function setTrickUI(on) {
   el('trickpanel').style.display = on ? 'block' : 'none';
-  for (const id of ['row-opponent', 'row-difficulty', 'newframe', 'rec147', 'scores']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
+  for (const id of ['newframe', 'rec147', 'scores']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
+  // Trick Shots runs as a hands-off "Watch AI vs AI" demonstration → show but LOCK the opponent to it
+  // (difficulty is locked to Deadly by syncDifficultyUI when self-play is active).
+  el('aimode').disabled = on;
 }
 
 // Draw the level's cue-stick rails as thin cylinders lying on the bed (a real cue used as a rail).
@@ -1469,6 +1472,7 @@ function syncTrickRails(level) {
   }
 }
 
+let priorAiMode = 'ai'; // opponent mode to restore when leaving Trick Shots
 function startTrickShots() {
   playing = false;
   endReplay();
@@ -1477,7 +1481,10 @@ function startTrickShots() {
   aiLineup = null;
   exhibition = null;
   trick = { index: 0, level: null, awaiting: false, passed: false };
+  priorAiMode = el('aimode').value;
+  el('aimode').value = 'self'; // start as a Watch AI-vs-AI demonstration (Deadly)
   setTrickUI(true);
+  syncDifficultyUI(); // self-play → difficulty shows + locks to Deadly
   updateRulesPanel();
   loadTrickLevel(0);
 }
@@ -1486,7 +1493,9 @@ function exitTrickShots() {
   if (!trick) return;
   cancelTrickAuto();
   trick = null;
+  el('aimode').value = priorAiMode; // restore the opponent mode you had before
   setTrickUI(false);
+  syncDifficultyUI();
   for (const c of [...trickRailGroup.children]) { trickRailGroup.remove(c); c.geometry?.dispose?.(); }
 }
 

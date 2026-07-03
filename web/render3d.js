@@ -22,7 +22,7 @@ import { aiTurn, chooseShotFinish, difficultyConfig, executeShot } from '../src/
 import { build147 } from '../src/exhibition.js';
 import { getLevel, runTrickShot, findSolution, CURATED_COUNT } from '../src/trickshots.js';
 import { buildPlanCache, replayState } from './replay.js';
-import { encodeFrame, decodeFrame, variantId as shareVariantId, variantById as shareVariantById } from '../src/share.js';
+import { encodeFrame, decodeFrame, verifyFrame, variantId as shareVariantId, variantById as shareVariantById } from '../src/share.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
 // from the selected variant. This file only draws — the physics/rules/AI are the headless engine the
@@ -737,6 +737,8 @@ let seedCounter = 1;
 let frameSeed = 0;
 let frameShots = [];
 let sharedReplay = null; // { shots, i } while watching a shared frame back
+let sharedFrame = null;  // the decoded frame being watched (persists so "Take over" works after it ends)
+let challenge = null;    // { target } while playing a "beat this" challenge (?challenge=)
 
 // --- broadcast HUD: running break, session-high, celebratory banners -------------------------
 // A "break" is the run a player builds in one unbroken visit — points in snooker/billiards
@@ -774,6 +776,7 @@ function updateBroadcast(shooter, scoresBefore, outcome) {
           : { text: `${bcast.brk} BREAK`, tier: 'silver' };
       }
     }
+    noteBreakProgress(); // verified personal best + beaten-challenge banner
   }
   if (game.frame.frameOver && typeof game.frame.winner === 'number') {
     bcast.pending = { text: `${playerLabel(game.frame.winner).toUpperCase()} WINS THE FRAME`, tier: 'gold' };
@@ -818,7 +821,7 @@ function newFrameGame() {
   pauseUntil = 0;
   pauseThen = null;
   aiLineup = null;
-  sharedReplay = null;
+  clearShareContext(); // a fresh frame drops any shared/challenge context
   frameSeed = seedCounter++; // record the rack seed so this frame is shareable/reproducible
   frameShots = [];
   aiRng = mulberry32(frameSeed); // fresh seed each frame → varied openings, still reproducible
@@ -829,6 +832,7 @@ function newFrameGame() {
   timeline = [];
   status.textContent = game.frame.message;
   updateScore();
+  updatePBLine();
   if (game.frame.ballInHand) beginBallInHand(); else endBallInHand(); // break = ball-in-hand
   maybeAiTurn();
   if (!isAiTurn()) resetHumanControls();
@@ -840,7 +844,7 @@ function playShot(shot) {
   if (playing) return;
   shot = applyCueConstraints(shot); // a raised cue (over a ball / off a cushion) can't draw — enforce it
   clearPreview(); // the aim line is spent the moment the shot is struck
-  if (!sharedReplay) frameShots.push({ angle: shot.angle, speed: shot.speed, spin: { side: shot.spin?.side ?? 0, vert: shot.spin?.vert ?? 0 }, elevation: shot.elevation ?? 0, cuePlacement: shot.cuePlacement ?? null }); // record for sharing
+  frameShots.push({ angle: shot.angle, speed: shot.speed, spin: { side: shot.spin?.side ?? 0, vert: shot.spin?.vert ?? 0 }, elevation: shot.elevation ?? 0, cuePlacement: shot.cuePlacement ?? null }); // record for sharing (incl. shared-frame replay, so Take over inherits the shots)
   const shooter = game.frame.turn; // who is at the table (before the rules reassign the turn)
   const scoresBefore = Array.isArray(game.frame.scores) ? [...game.frame.scores] : null;
   const res = takeShot(game, shot); // mutates game (rules + settled positions); returns the timeline
@@ -1340,23 +1344,48 @@ el('trick-retry').addEventListener('click', () => loadTrickLevel(trick ? trick.i
 el('trick-next').addEventListener('click', () => { if (trick) loadTrickLevel(trick.index + 1); });
 el('trick-show').addEventListener('click', showTrickSolution);
 
-// --- shareable frames -------------------------------------------------------------------------
+// --- shareable frames: watch, take over (correspondence), challenge, verified personal best ----
 // Because the engine is deterministic, the current frame = (variant, rack seed, executed shots). Encode
-// that into a ?frame= link (src/share.js); opening the link re-simulates and plays the exact frame back.
+// that into a ?frame= link (src/share.js); opening it re-simulates and plays the exact frame back. From
+// there you can Take over & reply (append your shots) — turn-based async play — or a ?challenge= link
+// racks the SAME layout and dares you to beat the sharer's break. Personal bests are stored as tokens,
+// so they're independently verifiable (tools/verify.mjs).
+function shareUrl() {
+  return `${location.origin}${location.pathname}?frame=${encodeFrame({ variantId: shareVariantId(variant), seed: frameSeed, shots: frameShots })}`;
+}
+function copyToClipboard(url, msg) {
+  const done = () => { status.textContent = msg; };
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done).catch(() => window.prompt('Link:', url));
+  else window.prompt('Link:', url);
+}
+let replying = false; // after Take over, the share button emits a ?frame= reply (watch my continuation)
 el('sharelink').addEventListener('click', () => {
   if (trick) { status.textContent = 'Sharing is for game frames, not Trick Shots.'; return; }
-  const token = encodeFrame({ variantId: shareVariantId(variant), seed: frameSeed, shots: frameShots });
-  const url = `${location.origin}${location.pathname}?frame=${token}`;
-  const done = () => { status.textContent = `Share link copied (${frameShots.length} shot${frameShots.length === 1 ? '' : 's'}).`; };
-  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done).catch(() => window.prompt('Share link:', url));
-  else window.prompt('Share link:', url);
+  if (!frameShots.length) { status.textContent = 'Play a shot first, then share the frame.'; return; }
+  const url = shareUrl().replace('?frame=', replying ? '?frame=' : '?challenge=');
+  copyToClipboard(url, replying ? 'Reply link copied — send it back.' : `Challenge link copied — dare a friend to beat this (${frameShots.length} shot${frameShots.length === 1 ? '' : 's'}).`);
 });
 
+// Reset the shared/challenge context (called when starting a fresh frame, variant, or trick mode).
+function clearShareContext() { sharedReplay = null; sharedFrame = null; challenge = null; replying = false; el('takeover').style.display = 'none'; el('sharelink').textContent = '🔗 Copy share link'; }
+
 // Load a shared frame: rack with its seed, then play its recorded shots back in order (watched, not
-// replayed by rules/AI). Reuses the shot-cam + broadcast HUD so it looks like a live frame.
+// re-decided by rules/AI). Reuses the shot-cam + broadcast HUD so it looks like a live frame.
 function startSharedReplay(decoded) {
+  loadFrameRack(decoded);
+  sharedFrame = decoded;
+  sharedReplay = { shots: decoded.shots, i: 0 };
+  el('takeover').style.display = '';
+  status.textContent = `Shared frame — ${decoded.shots.length} shot${decoded.shots.length === 1 ? '' : 's'} · watching`;
+  if (decoded.shots.length) playShot(decoded.shots[0]);
+  else { sharedReplay = null; status.textContent = 'Shared position — Take over to play on.'; }
+}
+
+// Common setup for a shared/challenge frame: swap to its variant and rack its seed.
+function loadFrameRack(decoded) {
   const v = shareVariantById(decoded.variantId);
   exitTrickShots();
+  clearShareContext();
   el('game').value = v.id;
   variant = v; applyVariantGeom(); rebuildTable(); frameCamera();
   for (const [, m] of ballMeshes) scene.remove(m.grp);
@@ -1366,17 +1395,72 @@ function startSharedReplay(decoded) {
   updateRulesPanel();
   playing = false; endReplay(); endShotCam(); aiLineup = null; aiPlace = null;
   frameSeed = decoded.seed;
+  frameShots = [];
   aiRng = mulberry32(decoded.seed);
   game = newGame(variant, { rng: aiRng });
   resetBreaks();
   syncBallMeshes(game.pieces);
   orient.clear();
-  endBallInHand(); // a watched replay isn't interactive; each shot carries its own recorded placement
+  endBallInHand();
+  updatePBLine();
   updateScore();
-  sharedReplay = { shots: decoded.shots, i: 0 };
-  status.textContent = `Shared frame — ${decoded.shots.length} shot${decoded.shots.length === 1 ? '' : 's'} · watching`;
-  if (decoded.shots.length) playShot(decoded.shots[0]);
-  else sharedReplay = null;
+}
+
+// Take over a watched frame from the current position and play on — your continued shots append to the
+// recorded ones, so "Copy reply link" is a fresh token you send back. Turn-based correspondence play.
+el('takeover').addEventListener('click', () => {
+  if (!sharedFrame) return;
+  if (sharedReplay && playing) { status.textContent = 'Wait for the shot to finish, then take over.'; return; }
+  sharedReplay = null; sharedFrame = null; replying = true;
+  el('takeover').style.display = 'none';
+  el('sharelink').textContent = '↩ Copy reply link';
+  status.textContent = 'Your turn — play on, then “Copy reply link” to send it back.';
+  if (game.frame.ballInHand) beginBallInHand(); else endBallInHand();
+  maybeAiTurn();
+  if (!isAiTurn()) resetHumanControls();
+  refreshHumanPreview();
+});
+
+// Beat-this challenge: rack the SAME layout as the sharer and play it yourself; their result is the bar.
+function startChallenge(token) {
+  const target = verifyFrame(token); // re-simulate the challenger's frame → their highest break etc.
+  const decoded = decodeFrame(token);
+  loadFrameRack(decoded);
+  challenge = { target, beaten: false };
+  const bar = target.highBreak > 0 ? `beat a break of ${target.highBreak} ${target.unit}` : 'pot more than they did';
+  status.textContent = `Challenge — ${bar}. Your turn.`;
+  updatePBLine();
+  maybeAiTurn();
+  if (!isAiTurn()) resetHumanControls();
+  refreshHumanPreview();
+}
+
+// --- verified personal best (per variant, stored as a shareable token) ------------------------
+const PB_KEY = 'snooker3d.pb.v1';
+let personalBest = (() => { try { return JSON.parse(localStorage.getItem(PB_KEY) || '{}'); } catch { return {}; } })();
+function savePB() { try { localStorage.setItem(PB_KEY, JSON.stringify(personalBest)); } catch { /* storage off */ } }
+function updatePBLine() {
+  const el2 = el('pbline'); if (!el2) return;
+  if (trick) { el2.textContent = ''; return; }
+  const pb = personalBest[variant.id];
+  const chal = challenge ? `   ·   target: ${challenge.target.highBreak}` : '';
+  el2.textContent = pb ? `★ your best ${variant.name ?? variant.id} break: ${pb.break}${chal}` : (chal ? chal.trim() : '');
+}
+// Called from updateBroadcast whenever the running break grows: bank a new personal best (as a verifiable
+// token) and flag a beaten challenge. Only for your own live play — not shared-frame watching or trick.
+function noteBreakProgress() {
+  if (sharedReplay || trick) return;
+  if (challenge && !challenge.beaten && bcast.high > challenge.target.highBreak && bcast.high > 0) {
+    challenge.beaten = true;
+    bcast.pending = { text: `CHALLENGE BEATEN · ${bcast.high}`, tier: 'gold' };
+  }
+  const pb = personalBest[variant.id];
+  if (bcast.high > 1 && (!pb || bcast.high > pb.break)) {
+    personalBest[variant.id] = { break: bcast.high, token: encodeFrame({ variantId: shareVariantId(variant), seed: frameSeed, shots: frameShots }) };
+    savePB();
+    updatePBLine();
+    if (!pb || bcast.high >= (pb.break + 1)) bcast.pending = bcast.pending || { text: `NEW BEST · ${bcast.high}`, tier: 'silver' };
+  }
 }
 
 // --- aiming: click the table, or fine-tune with buttons / arrow keys --------------------------
@@ -1644,7 +1728,7 @@ function armTrickAuto(index) {
 
 function setTrickUI(on) {
   el('trickpanel').style.display = on ? 'block' : 'none';
-  for (const id of ['newframe', 'scores', 'breakline']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
+  for (const id of ['newframe', 'sharelink', 'scores', 'breakline', 'pbline']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
   // Trick Shots runs as a hands-off "Watch AI vs AI" demonstration → show but LOCK the opponent to it
   // (difficulty is locked to Deadly by syncDifficultyUI when self-play is active).
   el('aimode').disabled = on;
@@ -1679,7 +1763,7 @@ function startTrickShots(startIndex = 0) {
   exhibition = null;
   trick = { index: startIndex, level: null, awaiting: false, passed: false };
   endBallInHand();
-  sharedReplay = null;
+  clearShareContext();
   priorAiMode = el('aimode').value;
   el('aimode').value = 'self'; // start as a Watch AI-vs-AI demonstration (Deadly)
   setTrickUI(true);
@@ -1912,7 +1996,10 @@ requestAnimationFrame(frame);
   const params = new URLSearchParams(location.search);
   const q = params.get('tricky');
   const frameToken = params.get('frame');
-  if (frameToken) {
+  const challengeToken = params.get('challenge');
+  if (challengeToken) {
+    try { startChallenge(challengeToken); } catch { status.textContent = 'That challenge link couldn’t be read.'; }
+  } else if (frameToken) {
     try { startSharedReplay(decodeFrame(frameToken)); } catch { status.textContent = 'That share link couldn’t be read.'; }
   } else if (q) {
     const idx = q === 'true' ? TRICK_LEVELS.leapfrog : (TRICK_LEVELS[q] ?? (Number.isInteger(+q) ? +q : TRICK_LEVELS.leapfrog));

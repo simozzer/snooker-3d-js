@@ -72,7 +72,7 @@
   <body>
     <div id="app">
       <div id="view">
-        <div id="version">v0.6</div>
+        <div id="version">v0.7</div>
         <div id="replayband">
           <div class="lb top"></div>
           <div class="lb bottom"></div>
@@ -88,6 +88,7 @@
         </div>
         <div id="scores" style="font-size:14px;font-weight:600;color:#cfe0ee;"></div>
         <div id="breakline"></div>
+        <div id="pbline" style="font-size:11px;color:#c9a94a;min-height:14px;"></div>
         <div class="ctl"><label>Game</label>
           <select id="game">
             <option value="snooker" selected>Snooker</option>
@@ -142,6 +143,7 @@
         <button id="play">▶ Play your shot</button>
         <button id="newframe" class="sec">New frame</button>
         <button id="sharelink" class="sec">🔗 Copy share link</button>
+        <button id="takeover" class="sec" style="display:none;">🎯 Take over &amp; reply</button>
         <label class="chk"><input type="checkbox" id="sound" checked /> Sound</label>
         <label class="chk"><input type="checkbox" id="replays" checked /> Pot replays (press any key to skip)</label>
         <label class="chk"><input type="checkbox" id="pincue" /> Cue-ball view (over-the-shoulder while aiming)</label>

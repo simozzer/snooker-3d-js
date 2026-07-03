@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeFrame, decodeFrame, replayFrame, mulberry32, variantId } from '../src/share.js';
+import { encodeFrame, decodeFrame, replayFrame, summarize, verifyFrame, mulberry32, variantId } from '../src/share.js';
 import { newGame } from '../src/game.js';
 import { pool } from '../src/variants/pool.js';
 
@@ -58,6 +58,32 @@ test('replaying a decoded token is deterministic and reproduces the frame bit-fo
   // the pack actually moved (the shots did something)
   const fresh = newGame(pool, { rng: mulberry32(999) });
   assert.notEqual(posKey(A.game), posKey(fresh), 'replayed frame is identical to the untouched rack — shots had no effect');
+});
+
+test('verifyFrame re-simulates a token to a well-formed, deterministic summary', () => {
+  // a firm pool break off the head spot — deterministic given the seed
+  const shots = [{ angle: 0.0, speed: 8.0, spin: { side: 0, vert: 0 }, elevation: 0, cuePlacement: { x: -0.56, y: 0 } }];
+  const token = encodeFrame({ variantId: variantId(pool), seed: 20260703, shots });
+  const v1 = verifyFrame(token);
+  const v2 = verifyFrame(token);
+  assert.equal(v1.valid, true);
+  assert.equal(v1.variant, 'pool');
+  assert.ok(v1.winner === null || v1.winner === 0 || v1.winner === 1, `winner: ${v1.winner}`);
+  assert.ok(Number.isInteger(v1.highBreak) && v1.highBreak >= 0, `highBreak: ${v1.highBreak}`);
+  assert.equal(v1.shots, 1);
+  assert.deepEqual(v1, v2, 'verifyFrame must be deterministic (a verifier re-runs it)');
+});
+
+test('summarize matches verifyFrame, and a whiff scores a zero break', () => {
+  // aim away from everything at low pace → no contact, no pot
+  const shots = [{ angle: Math.PI, speed: 1.5, spin: { side: 0, vert: 0 }, elevation: 0, cuePlacement: { x: -0.9, y: 0 } }];
+  const token = encodeFrame({ variantId: variantId(pool), seed: 5, shots });
+  const decoded = decodeFrame(token);
+  const summary = summarize(replayFrame(decoded));
+  const verified = verifyFrame(token);
+  assert.equal(summary.highBreak, verified.highBreak);
+  assert.equal(summary.winner, verified.winner);
+  assert.equal(summary.highBreak, 0, 'a shot that pots nothing has a zero break');
 });
 
 test('a full encode→decode→encode cycle is stable (canonical token)', () => {

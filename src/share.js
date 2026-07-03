@@ -119,13 +119,51 @@ export function decodeFrame(token) {
 export function replayFrame({ variantId: vId = 0, seed = 0, shots = [] }) {
   const variant = variantById(vId);
   const game = newGame(variant, { rng: mulberry32(seed) });
+  const usesPoints = Array.isArray(game.frame.scores);
   const steps = [];
   for (const shot of shots) {
+    const shooter = game.frame.turn;
+    const scoresBefore = usesPoints ? [...game.frame.scores] : null;
+    const before = new Set(game.pieces.filter((p) => p.id !== 'cue').map((p) => p.id));
     const res = takeShot(game, shot);
-    steps.push({ shot, timeline: res.timeline, outcome: res.outcome });
+    let pots = 0;
+    for (const id of before) if (!game.pieces.some((p) => p.id === id)) pots += 1; // object balls removed this shot
+    const gain = usesPoints ? game.frame.scores[shooter] - scoresBefore[shooter] : pots;
+    steps.push({ shot, timeline: res.timeline, outcome: res.outcome, shooter, gain, pots, continues: !!res.outcome.continues });
     if (game.frame.frameOver) break;
   }
-  return { variant, game, steps };
+  return { variant, game, steps, usesPoints };
+}
+
+// Rank-worthy summary of a replayed frame: winner, final scores, and highest break (a player's best run
+// in one unbroken visit — points in snooker/billiards, balls potted otherwise). Pure — derived only from
+// the deterministic replay, so a leaderboard server can re-run this to VERIFY a claimed score.
+export function summarize(replay) {
+  const { variant, game, steps, usesPoints } = replay;
+  let brk = 0, owner = null, high = 0, highBy = null;
+  for (const s of steps) {
+    if (owner !== s.shooter) { brk = 0; owner = s.shooter; } // a new player at the table → break resets
+    if (s.gain > 0) { brk += s.gain; if (brk > high) { high = brk; highBy = s.shooter; } }
+  }
+  return {
+    variant: variant.id,
+    variantId: variantId(variant),
+    frameOver: game.frame.frameOver,
+    winner: typeof game.frame.winner === 'number' ? game.frame.winner : (game.frame.winner ?? null),
+    scores: usesPoints ? [...game.frame.scores] : null,
+    highBreak: high,
+    highBreakBy: highBy,
+    shots: steps.length,
+    unit: usesPoints ? 'points' : 'balls',
+  };
+}
+
+// Decode + replay + summarise a token — the exact operation a verifying server runs. Throws on a bad
+// token; returns { valid:true, seed, ...summary } otherwise.
+export function verifyFrame(token) {
+  const decoded = decodeFrame(token);
+  const replay = replayFrame(decoded);
+  return { valid: true, seed: decoded.seed, ...summarize(replay) };
 }
 
 // Convenience: a token straight from an in-progress frame's (variant, seed, executed shots).

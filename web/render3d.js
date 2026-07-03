@@ -1543,21 +1543,23 @@ function syncTrickRails(level) {
 }
 
 let priorAiMode = 'ai'; // opponent mode to restore when leaving Trick Shots
-function startTrickShots() {
+function startTrickShots(startIndex = 0) {
   playing = false;
   endReplay();
   endShotCam();
   pauseThen = null; pauseUntil = 0;
   aiLineup = null;
   exhibition = null;
-  trick = { index: 0, level: null, awaiting: false, passed: false };
+  trick = { index: startIndex, level: null, awaiting: false, passed: false };
   priorAiMode = el('aimode').value;
   el('aimode').value = 'self'; // start as a Watch AI-vs-AI demonstration (Deadly)
   setTrickUI(true);
   syncDifficultyUI(); // self-play → difficulty shows + locks to Deadly
   updateRulesPanel();
-  loadTrickLevel(0);
+  loadTrickLevel(startIndex);
 }
+// Index of a curated level by id, for deep-links (e.g. ?tricky=true → the Leapfrog).
+const TRICK_LEVELS = { sledgehammer: 0, leapfrog: 1, guardrail: 2, alley: 3, double: 4 };
 
 function exitTrickShots() {
   if (!trick) return;
@@ -1754,3 +1756,14 @@ function frame(now) {
 resize();
 newFrameGame();
 requestAnimationFrame(frame);
+
+// Deep-link: ?tricky=true jumps straight into Trick Shots on the Leapfrog and auto-demos it. A
+// ?tricky=<levelId> (e.g. guardrail) or ?tricky=<n> targets a specific level.
+{
+  const q = new URLSearchParams(location.search).get('tricky');
+  if (q) {
+    const idx = q === 'true' ? TRICK_LEVELS.leapfrog : (TRICK_LEVELS[q] ?? (Number.isInteger(+q) ? +q : TRICK_LEVELS.leapfrog));
+    el('game').value = 'trickshots';
+    startTrickShots(idx);
+  }
+}

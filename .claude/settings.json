@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ping *)",
+      "mcp__Claude_in_Chrome__read_page",
+      "mcp__Claude_in_Chrome__list_connected_browsers"
+    ]
+  }
+}

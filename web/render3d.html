@@ -45,6 +45,16 @@
         color: #e6edf3; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
       @keyframes replaypulse { 0%,100% { opacity: 1; } 50% { opacity: .2; } }
       @keyframes replaypop { from { transform: translateX(-50%) scale(.7); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
+      /* broadcast HUD: running break sub-line + a big celebratory banner */
+      #breakline { font-size: 12px; color: #8fb3d0; min-height: 15px; margin-top: -6px; letter-spacing: .3px; }
+      #bcastbanner { position: absolute; top: 16%; left: 50%; transform: translateX(-50%); z-index: 4; pointer-events: none;
+        display: none; padding: 12px 30px; border-radius: 999px; font-weight: 900; letter-spacing: 4px; font-size: 30px;
+        white-space: nowrap; text-shadow: 0 2px 10px rgba(0,0,0,.75); background: rgba(10,12,16,0.66); }
+      #bcastbanner.show { display: block; animation: bcastpop 2.6s ease-out 1 forwards; }
+      #bcastbanner.gold { color: #ffdf6b; border: 2px solid rgba(255,210,80,0.95); box-shadow: 0 0 32px rgba(255,205,70,0.45); }
+      #bcastbanner.silver { color: #dfe9f2; border: 2px solid rgba(200,220,240,0.9); box-shadow: 0 0 24px rgba(180,210,240,0.3); }
+      @keyframes bcastpop { 0% { transform: translateX(-50%) scale(.6); opacity: 0; } 12% { transform: translateX(-50%) scale(1.05); opacity: 1; }
+        20% { transform: translateX(-50%) scale(1); } 82% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) scale(1); } }
       /* collapsible how-to-play / rules */
       details#rules { border: 1px solid #33404c; border-radius: 8px; background: #151b21; }
       details#rules > summary { list-style: none; cursor: pointer; padding: 9px 12px; font-size: 13px; font-weight: 600; color: #cfe0ee; user-select: none; }
@@ -66,6 +76,7 @@
           <div class="badge"><span class="dot"></span>REPLAY</div>
           <div class="sub">press any key to skip</div>
         </div>
+        <div id="bcastbanner"></div>
       </div>
       <div id="panel">
         <div>
@@ -73,6 +84,7 @@
           <div class="hint">Deterministic engine decides &amp; resolves; this only draws. Physics untouched.</div>
         </div>
         <div id="scores" style="font-size:14px;font-weight:600;color:#cfe0ee;"></div>
+        <div id="breakline"></div>
         <div class="ctl"><label>Game</label>
           <select id="game">
             <option value="snooker" selected>Snooker</option>

@@ -693,13 +693,77 @@ let simT = 0;
 let lastFrame = 0;
 let seedCounter = 1;
 
+// --- broadcast HUD: running break, session-high, celebratory banners -------------------------
+// A "break" is the run a player builds in one unbroken visit — points in snooker/billiards
+// (frame.scores), or balls potted in a row in pool/9-ball. Tracked per shot in playShot, rendered by
+// updateScore + a big banner. Makes AI-vs-AI read like a broadcast rather than silent auto-play.
+let bcast = { brk: 0, owner: null, high: 0, highBy: null, milestone: 0, pending: null };
+const usesPoints = () => Array.isArray(game && game.frame && game.frame.scores);
+
+function playerLabel(i) {
+  if (i == null || i < 0) return '';
+  if (selfPlay()) return `AI ${i + 1}`; // both sides are the AI
+  if (!aiEnabled()) return `Player ${i + 1}`; // hot-seat
+  return i === 0 ? 'You' : 'AI';
+}
+
+function resetBreaks({ keepHigh = false } = {}) {
+  bcast.brk = 0; bcast.owner = null; bcast.milestone = 0; bcast.pending = null;
+  if (!keepHigh) { bcast.high = 0; bcast.highBy = null; }
+}
+
+// Fold a resolved shot into the running break. `shooter` = who played; `scoresBefore` = their score
+// snapshot before takeShot (null for pot-counting variants); `outcome` = variant.applyOutcome result.
+function updateBroadcast(shooter, scoresBefore, outcome) {
+  if (bcast.owner !== shooter) { bcast.brk = 0; bcast.owner = shooter; bcast.milestone = 0; } // fresh visit
+  const gain = scoresBefore ? game.frame.scores[shooter] - scoresBefore[shooter] : lastPots.length;
+  if (gain > 0) {
+    bcast.brk += gain;
+    if (bcast.brk > bcast.high) { bcast.high = bcast.brk; bcast.highBy = shooter; }
+    if (scoresBefore) { // points milestones (snooker/billiards) → a banner once the shot settles
+      const ms = bcast.brk >= 147 ? 147 : bcast.brk >= 100 ? 100 : bcast.brk >= 50 ? 50 : 0;
+      if (ms > bcast.milestone) {
+        bcast.milestone = ms;
+        bcast.pending = ms === 147 ? { text: 'MAXIMUM 147!', tier: 'gold' }
+          : ms === 100 ? { text: `CENTURY BREAK · ${bcast.brk}`, tier: 'gold' }
+          : { text: `${bcast.brk} BREAK`, tier: 'silver' };
+      }
+    }
+  }
+  if (game.frame.frameOver && typeof game.frame.winner === 'number') {
+    bcast.pending = { text: `${playerLabel(game.frame.winner).toUpperCase()} WINS THE FRAME`, tier: 'gold' };
+  }
+}
+
+// Commentary for the status line: relabel players for AI-vs-AI and append the running break.
+function commentary(outcome) {
+  let msg = (outcome && outcome.message) || '';
+  if (selfPlay()) msg = msg.replace(/Player 1/g, 'AI 1').replace(/Player 2/g, 'AI 2');
+  if (bcast.brk >= 2 && bcast.owner != null) msg += usesPoints() ? ` · break ${bcast.brk}` : ` · ${bcast.brk} in a row`;
+  return msg;
+}
+
+let bannerTimer = null;
+function showBanner(text, tier) {
+  const b = el('bcastbanner');
+  b.textContent = text;
+  b.className = ''; void b.offsetWidth; // restart the CSS animation
+  b.classList.add('show', tier);
+  if (bannerTimer) clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => { b.className = ''; }, 2600);
+}
+function flushBanner() { if (bcast.pending) { showBanner(bcast.pending.text, bcast.pending.tier); bcast.pending = null; } }
+
 function updateScore() {
   // variant HUD: sideValue = each player's score/label, centerText = the current ball-on / state
   const a = variant.sideValue ? variant.sideValue(game.frame, 0) : game.frame.scores[0];
   const b = variant.sideValue ? variant.sideValue(game.frame, 1) : game.frame.scores[1];
   const on = variant.centerText ? variant.centerText(game.frame) : '';
-  const who = game.frame.frameOver ? '' : `— ${isAiTurn() ? 'AI' : 'You'} to play`;
-  scoreEl.textContent = `You ${a} · AI ${b}${on ? `   ·   ${on}` : ''}   ${who}`;
+  const who = game.frame.frameOver ? '' : `— ${playerLabel(game.frame.turn)} to play`;
+  scoreEl.textContent = `${playerLabel(0)} ${a} · ${playerLabel(1)} ${b}${on ? `   ·   ${on}` : ''}   ${who}`;
+  const brkStr = bcast.brk >= 2 && bcast.owner != null ? `${playerLabel(bcast.owner)} break: ${bcast.brk}` : '';
+  const highStr = bcast.high >= 2 ? `high: ${bcast.high}${bcast.highBy != null ? ` (${playerLabel(bcast.highBy)})` : ''}` : '';
+  const bl = el('breakline'); if (bl) bl.textContent = [brkStr, highStr].filter(Boolean).join('   ·   ');
 }
 
 function newFrameGame() {
@@ -711,6 +775,7 @@ function newFrameGame() {
   aiLineup = null;
   aiRng = mulberry32(seedCounter++); // fresh seed each frame → varied openings, still reproducible
   game = newGame(variant, { rng: aiRng });
+  resetBreaks({ keepHigh: true }); // new frame, but the session-high break carries across frames
   syncBallMeshes(game.pieces);
   orient.clear();
   timeline = [];
@@ -726,14 +791,17 @@ function playShot(shot) {
   if (playing) return;
   shot = applyCueConstraints(shot); // a raised cue (over a ball / off a cushion) can't draw — enforce it
   clearPreview(); // the aim line is spent the moment the shot is struck
+  const shooter = game.frame.turn; // who is at the table (before the rules reassign the turn)
+  const scoresBefore = Array.isArray(game.frame.scores) ? [...game.frame.scores] : null;
   const res = takeShot(game, shot); // mutates game (rules + settled positions); returns the timeline
   timeline = res.timeline;
   planCache = buildPlanCache(timeline, R);
   endT = timeline.length ? timeline[timeline.length - 1].t : 0;
-  status.textContent = res.outcome.message;
-  updateScore();
   lastAngle = shot.angle;
   lastPots = pottedObjectBalls(timeline); // object balls dropped this shot → worth a replay
+  updateBroadcast(shooter, scoresBefore, res.outcome); // fold into the running break (banner flushes on settle)
+  status.textContent = commentary(res.outcome);
+  updateScore();
   simT = 0;
   soundIdx = 0;
   playing = true;
@@ -1143,6 +1211,7 @@ function onReplayEnd() {
   if (trick) { onTrickShotEnd(); return; } // Trick Shots: judge the goal, don't run game rules/AI
   syncBallMeshes(game.pieces); // authoritative resting positions from the rules reconciliation
   updateScore();
+  flushBanner(); // century / frame-won banner, held until the shot has settled
   if (game.frame.frameOver) {
     status.textContent = game.frame.message;
     // Watch AI vs AI → rack a fresh frame automatically after a beat so it plays on indefinitely
@@ -1171,6 +1240,7 @@ function setVariant(v) {
   orient.clear();
   const h1 = document.querySelector('#panel h1');
   if (h1) h1.textContent = `${variant.name ?? 'SNOOKER'} · 3D`;
+  resetBreaks(); // different game → the break unit/high changes; start the session fresh
   updateRulesPanel();
   newFrameGame();
 }
@@ -1447,7 +1517,7 @@ function armTrickAuto(index) {
 
 function setTrickUI(on) {
   el('trickpanel').style.display = on ? 'block' : 'none';
-  for (const id of ['newframe', 'rec147', 'scores']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
+  for (const id of ['newframe', 'rec147', 'scores', 'breakline']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
   // Trick Shots runs as a hands-off "Watch AI vs AI" demonstration → show but LOCK the opponent to it
   // (difficulty is locked to Deadly by syncDifficultyUI when self-play is active).
   el('aimode').disabled = on;

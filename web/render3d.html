@@ -47,6 +47,8 @@
       @keyframes replaypop { from { transform: translateX(-50%) scale(.7); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
       /* broadcast HUD: running break sub-line + a big celebratory banner */
       #breakline { font-size: 12px; color: #8fb3d0; min-height: 15px; margin-top: -6px; letter-spacing: .3px; }
+      #version { position: absolute; top: 10px; left: 12px; z-index: 5; pointer-events: none; user-select: none;
+        font-size: 12px; font-weight: 600; letter-spacing: .5px; color: #6f8496; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
       #bcastbanner { position: absolute; top: 16%; left: 50%; transform: translateX(-50%); z-index: 4; pointer-events: none;
         display: none; padding: 12px 30px; border-radius: 999px; font-weight: 900; letter-spacing: 4px; font-size: 30px;
         white-space: nowrap; text-shadow: 0 2px 10px rgba(0,0,0,.75); background: rgba(10,12,16,0.66); }
@@ -70,6 +72,7 @@
   <body>
     <div id="app">
       <div id="view">
+        <div id="version">v0.5</div>
         <div id="replayband">
           <div class="lb top"></div>
           <div class="lb bottom"></div>
@@ -138,7 +141,6 @@
         </div>
         <button id="play">▶ Play your shot</button>
         <button id="newframe" class="sec">New frame</button>
-        <button id="rec147" class="sec">⏺ Record a 147 (video)</button>
         <label class="chk"><input type="checkbox" id="sound" checked /> Sound</label>
         <label class="chk"><input type="checkbox" id="replays" checked /> Pot replays (press any key to skip)</label>
         <label class="chk"><input type="checkbox" id="pincue" /> Cue-ball view (over-the-shoulder while aiming)</label>

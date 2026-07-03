@@ -1511,7 +1511,6 @@ async function startExhibition(record) {
   if (record) startRecording();
   playExhibitionStep();
 }
-el('rec147').addEventListener('click', () => { startExhibition(true); });
 
 // --- Trick Shots mode ------------------------------------------------------------------------
 // A solo, level-based challenge (src/trickshots.js): each level is a fixed layout + a machine-checkable
@@ -1542,7 +1541,7 @@ function armTrickAuto(index) {
 
 function setTrickUI(on) {
   el('trickpanel').style.display = on ? 'block' : 'none';
-  for (const id of ['newframe', 'rec147', 'scores', 'breakline']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
+  for (const id of ['newframe', 'scores', 'breakline']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
   // Trick Shots runs as a hands-off "Watch AI vs AI" demonstration → show but LOCK the opponent to it
   // (difficulty is locked to Deadly by syncDifficultyUI when self-play is active).
   el('aimode').disabled = on;

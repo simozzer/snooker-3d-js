@@ -434,7 +434,7 @@ function refreshLabels() {
   el('v-power').textContent = `${(+sliders.power.value).toFixed(1)} m/s`;
   el('v-spin').textContent = `${spin.side >= 0 ? 'R' : 'L'}${Math.abs(spin.side).toFixed(2)} · ${spin.vert >= 0 ? 'follow' : 'draw'} ${Math.abs(spin.vert).toFixed(2)} · lift ${Math.round(elevationDeg())}°`;
 }
-sliders.power.addEventListener('input', () => { refreshLabels(); refreshHumanPreview(); });
+sliders.power.addEventListener('input', () => { cancelTrickAuto(); refreshLabels(); refreshHumanPreview(); });
 sliders.angle.addEventListener('input', () => { aimDeg = +sliders.angle.value; refreshLabels(); refreshHumanPreview(); });
 
 const pad = el('spinpad');
@@ -666,9 +666,10 @@ const CONTROLS_HOWTO = [
   'Press “Play your shot” to strike. Drag to orbit the view, scroll to zoom.',
 ];
 const TRICK_HOWTO = [
-  'Every level shows an objective at the top — line up aim / power / spin / jump, then Play.',
+  'Each level auto-plays the perfect stroke at deadly precision to demonstrate the shot — the ball follows the drawn prediction exactly.',
+  'Want to try it yourself? Just aim (click the table or ◀ ▶) before it fires — that cancels the demo and hands you the shot.',
   'Anything goes: all shots are legal and jump shots count. Some levels lay a cue stick on the table as a rail to bank off.',
-  '↺ Retry resets the layout · “Show me” plays a winning solution · “Next ▶” unlocks once you make the shot.',
+  '↺ Retry replays the demo · “Show me” plays it now · “Next ▶” unlocks once the shot is made.',
 ];
 const TRICK_RULES = [
   'No fouls and no turns — just complete the objective to clear the level.',
@@ -1048,7 +1049,7 @@ function endShotCam() {
 // The human's shot from the sliders (aim/power/spin/elevation). Ball-in-hand uses the default D spot.
 function humanShot() {
   if (playing) return;
-  if (trick) { if (!trick.awaiting) playTrickShot(sliderShot()); return; }
+  if (trick) { cancelTrickAuto(); if (!trick.awaiting) playTrickShot(sliderShot()); return; }
   if (isAiTurn() || game.frame.frameOver) return;
   playShot(sliderShot());
 }
@@ -1231,11 +1232,12 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   if (!t) return;
   const c = cueBallPos();
   if (t.x === c.x && t.y === c.y) return;
+  cancelTrickAuto(); // you're aiming yourself → cancel the auto-demo
   setAim((Math.atan2(t.y - c.y, t.x - c.x) * 180) / Math.PI);
 });
 
 function holdAimButton(button, dir) {
-  const down = (ev) => { aimHeldDir = dir; try { button.setPointerCapture(ev.pointerId); } catch { /* non-capturable */ } };
+  const down = (ev) => { cancelTrickAuto(); aimHeldDir = dir; try { button.setPointerCapture(ev.pointerId); } catch { /* non-capturable */ } };
   const up = () => { if (aimHeldDir === dir) { aimHeldDir = 0; aimHoldFrames = 0; } };
   button.addEventListener('pointerdown', down);
   button.addEventListener('pointerup', up);
@@ -1247,8 +1249,8 @@ holdAimButton(el('angleR'), 1);
 window.addEventListener('keydown', (ev) => {
   if (replaying || pauseThen === 'replay') { skipReplay(); ev.preventDefault(); return; } // any key skips a pot replay
   if (document.activeElement === sliders.angle) return; // let the focused slider handle its own arrows
-  if (ev.key === 'ArrowLeft') { aimHeldDir = -1; ev.preventDefault(); }
-  else if (ev.key === 'ArrowRight') { aimHeldDir = 1; ev.preventDefault(); }
+  if (ev.key === 'ArrowLeft') { cancelTrickAuto(); aimHeldDir = -1; ev.preventDefault(); }
+  else if (ev.key === 'ArrowRight') { cancelTrickAuto(); aimHeldDir = 1; ev.preventDefault(); }
 });
 window.addEventListener('keyup', (ev) => {
   if ((ev.key === 'ArrowLeft' && aimHeldDir === -1) || (ev.key === 'ArrowRight' && aimHeldDir === 1)) { aimHeldDir = 0; aimHoldFrames = 0; }
@@ -1426,6 +1428,23 @@ let trickSeed = 20260701; // varies generated layouts run to run (fixed here for
 const trickRailGroup = new THREE.Group();
 scene.add(trickRailGroup);
 
+// "Deadly demonstration": on loading a level we auto-play the winning stroke perfectly (zero error) to
+// show off the engine's accuracy. It's armed after a short beat so you can see the layout + predicted
+// line first; any manual aim/power input cancels it so you can attempt the shot yourself.
+let trickAutoTimer = null;
+const TRICK_AUTO_DELAY = 1700; // ms to admire the layout + predicted path before the demo fires
+function cancelTrickAuto() { if (trickAutoTimer) { clearTimeout(trickAutoTimer); trickAutoTimer = null; } }
+function armTrickAuto(index) {
+  cancelTrickAuto();
+  trickAutoTimer = setTimeout(() => {
+    trickAutoTimer = null;
+    if (trick && trick.index === index && trick.solution && !playing && !trick.awaiting) {
+      status.textContent = '⭐ Deadly demonstration — the perfect stroke';
+      playTrickShot(trick.solution);
+    }
+  }, TRICK_AUTO_DELAY);
+}
+
 function setTrickUI(on) {
   el('trickpanel').style.display = on ? 'block' : 'none';
   for (const id of ['row-opponent', 'row-difficulty', 'newframe', 'rec147', 'scores']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
@@ -1465,6 +1484,7 @@ function startTrickShots() {
 
 function exitTrickShots() {
   if (!trick) return;
+  cancelTrickAuto();
   trick = null;
   setTrickUI(false);
   for (const c of [...trickRailGroup.children]) { trickRailGroup.remove(c); c.geometry?.dispose?.(); }
@@ -1507,10 +1527,23 @@ async function loadTrickLevel(index) {
   el('trick-name').textContent = level.name ?? `Level ${index + 1}`;
   el('trick-level').textContent = index < CURATED_COUNT ? `Famous · ${index + 1}/${CURATED_COUNT}` : `Level ${index + 1}`;
   el('trick-objective').textContent = level.objective ?? '';
-  status.textContent = 'Line up your shot, then Play.';
   resetHumanControls();
-  setAim(lastAngle ? (lastAngle * 180) / Math.PI : 0);
-  refreshHumanPreview();
+  // Line the controls + predicted path up on the winning stroke, then auto-play it perfectly after a
+  // beat (the "deadly demonstration"). Aiming yourself cancels it — see cancelTrickAuto() call sites.
+  const sol = level.solution || findSolution(level);
+  trick.solution = sol;
+  if (sol) {
+    setAim((sol.angle * 180) / Math.PI);
+    sliders.power.value = String(Math.min(+sol.speed.toFixed(2), MAX_SPEED));
+    refreshLabels();
+    drawPreviewPaths(computePreviewPaths(sol)); // the exact predicted line — proves the ball follows it
+    status.textContent = 'Demonstrating the shot… (aim yourself to take over)';
+    armTrickAuto(index);
+  } else {
+    setAim(lastAngle ? (lastAngle * 180) / Math.PI : 0);
+    status.textContent = 'Line up your shot, then Play.';
+    refreshHumanPreview();
+  }
 }
 
 // Resolve a trick shot rules-free (table cushions + the level's cue-rails), then play it back through
@@ -1547,7 +1580,8 @@ function onTrickShotEnd() {
 // Play a known winning stroke (the stored solution, or one searched on demand) as a demo.
 function showTrickSolution() {
   if (!trick || !trick.level || playing) return;
-  const sol = trick.level.solution || findSolution(trick.level);
+  cancelTrickAuto();
+  const sol = trick.solution || trick.level.solution || findSolution(trick.level);
   if (!sol) { status.textContent = 'No solution found to show.'; return; }
   resetHumanControls();
   setAim((sol.angle * 180) / Math.PI);

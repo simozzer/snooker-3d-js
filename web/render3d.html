@@ -155,8 +155,9 @@
         </details>
       </div>
     </div>
+    <!-- three.js is vendored locally (web/vendor/three, r160) so the app needs no CDN / network. -->
     <script type="importmap">
-      { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+      { "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
     </script>
     <script type="module" src="./render3d.js"></script>
   </body>

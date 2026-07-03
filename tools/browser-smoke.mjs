@@ -6,8 +6,8 @@
 //   npm run test:browser
 //
 // It is NOT part of `npm test` (kept out of test/ so node --test won't auto-discover it), because it
-// needs a Chrome/Edge binary AND network (three.js loads from a CDN). If either is missing it SKIPS
-// cleanly (exit 0) rather than failing, so it never breaks a machine that just can't run it.
+// needs a Chrome/Edge binary. (three.js is vendored locally, so no network is required.) If Chrome is
+// missing it SKIPS cleanly (exit 0) rather than failing, so it never breaks a machine that can't run it.
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';

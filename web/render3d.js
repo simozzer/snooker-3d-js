@@ -592,7 +592,7 @@ function sliderShot() {
     speed: Math.min(+sliders.power.value, MAX_SPEED),
     spin: { side: spin.side, vert: spin.vert },
     elevation: (elevationDeg() * Math.PI) / 180,
-    cuePlacement: game.frame.ballInHand ? variant.defaultPlacement(game) : null,
+    cuePlacement: game.frame.ballInHand ? (heldCuePos ?? variant.defaultPlacement(game)) : null,
   };
 }
 
@@ -630,8 +630,38 @@ function resetHumanControls() {
 // (its aim, 1.0 pace, no spin) to its FINAL chosen shot (its pace + spin), so a watcher sees the
 // choice form, then play it. The frame loop drives the animation (see aiLineup handling).
 let aiLineup = null;
-function playAiShot(shot) {
-  if (playing || game.frame.frameOver) { playShot(shot); return; }
+
+// --- ball-in-hand placement phase ------------------------------------------------------------
+// When the frame owes ball-in-hand (the break, or after the cue is pocketed) the white must be PLACED
+// before aiming. The human drags it to a legal spot by clicking the bed; the AI slides it to its chosen
+// spot in a short animation. heldCuePos is the current placement; `placing` marks the human phase.
+let heldCuePos = null; // {x,y} while ball-in-hand, else null
+let placing = false;   // human is placing the cue ball
+let aiPlace = null;    // AI placement animation: { from, to, start, dur, shot }
+
+// Show/move the cue ball at `pos`, materialising its mesh if the cue isn't on the table yet.
+function setCuePiecePos(pos) {
+  let cue = game.pieces.find((p) => p.id === 'cue');
+  if (!cue) { cue = { id: 'cue', color: variant.cueColor, group: 'cue', kind: 'cue', pos: { ...pos } }; game.pieces.push(cue); syncBallMeshes(game.pieces); }
+  cue.pos = { x: pos.x, y: pos.y };
+  const m = ballMeshes.get('cue');
+  if (m) { m.grp.visible = true; m.grp.position.copy(P3(pos.x, pos.y, R)); }
+}
+
+// Enter the placement phase for the current turn: park the white on its default spot. The human then
+// repositions it (pointer handler); the AI's own placement animates in when its shot arrives.
+function beginBallInHand() {
+  const def = variant.defaultPlacement(game);
+  heldCuePos = { x: def.x, y: def.y };
+  setCuePiecePos(heldCuePos);
+  aiPlace = null;
+  if (isAiTurn()) { placing = false; }
+  else { placing = true; status.textContent = `${variant.ballInHandLabel || 'Ball in hand'} — click the bed to place, then aim with ◀ ▶ and Play.`; }
+}
+function endBallInHand() { placing = false; heldCuePos = null; aiPlace = null; }
+
+// Set up the AI's cue-strike line-up (naive first try → final choice), driven by the frame loop.
+function startAiLineup(shot) {
   aiLineup = {
     first: { angle: shot.angle, speed: 1.0, spin: { side: 0, vert: 0 }, elevation: 0, cuePlacement: shot.cuePlacement },
     final: shot,
@@ -639,6 +669,16 @@ function playAiShot(shot) {
     dur: 1200,
   };
   status.textContent = 'AI lining up…';
+}
+function playAiShot(shot) {
+  if (playing || game.frame.frameOver) { playShot(shot); return; }
+  // ball-in-hand: slide the white to the AI's chosen spot first, THEN line up
+  if (game.frame.ballInHand && shot.cuePlacement) {
+    aiPlace = { from: { ...(heldCuePos || variant.defaultPlacement(game)) }, to: { ...shot.cuePlacement }, start: performance.now(), dur: 900, shot };
+    status.textContent = 'AI placing the cue ball…';
+    return;
+  }
+  startAiLineup(shot);
 }
 
 el('trajectory').addEventListener('change', refreshHumanPreview);
@@ -781,6 +821,7 @@ function newFrameGame() {
   timeline = [];
   status.textContent = game.frame.message;
   updateScore();
+  if (game.frame.ballInHand) beginBallInHand(); else endBallInHand(); // break = ball-in-hand
   maybeAiTurn();
   if (!isAiTurn()) resetHumanControls();
   refreshHumanPreview();
@@ -1243,6 +1284,7 @@ function onReplayEnd() {
     if (selfPlay() && !exhibition) setTimeout(() => { if (game.frame.frameOver && selfPlay() && !exhibition) newFrameGame(); }, 3000);
     return;
   }
+  if (game.frame.ballInHand) beginBallInHand(); else endBallInHand(); // cue potted → place it before playing on
   maybeAiTurn();
   if (!isAiTurn()) resetHumanControls(); // your shot → start from a reasonable first try (1.0, no spin)
   refreshHumanPreview(); // if it's now your shot, show the aim line
@@ -1297,6 +1339,7 @@ let aimHeldDir = 0; // -1 (left) | 0 | +1 (right)
 let aimHoldFrames = 0;
 
 function cueBallPos() {
+  if (game.frame.ballInHand && heldCuePos) return heldCuePos; // the placement you're setting this turn
   const c = game.pieces.find((p) => p.id === 'cue');
   if (c) return c.pos;
   return game.frame.ballInHand ? variant.defaultPlacement(game) : { x: 0, y: 0 };
@@ -1325,6 +1368,11 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   if (!game || playing || isAiTurn() || game.frame.frameOver) return;
   const t = pointerToTable(ev);
   if (!t) return;
+  // ball-in-hand: a click PLACES the cue ball (to a legal spot); aiming is via the ◀▶ / slider controls
+  if (placing) {
+    if (variant.placementLegal(game, t.x, t.y)) { heldCuePos = { x: t.x, y: t.y }; setCuePiecePos(heldCuePos); refreshHumanPreview(); }
+    return;
+  }
   const c = cueBallPos();
   if (t.x === c.x && t.y === c.y) return;
   cancelTrickAuto(); // you're aiming yourself → cancel the auto-demo
@@ -1575,6 +1623,7 @@ function startTrickShots(startIndex = 0) {
   aiLineup = null;
   exhibition = null;
   trick = { index: startIndex, level: null, awaiting: false, passed: false };
+  endBallInHand();
   priorAiMode = el('aimode').value;
   el('aimode').value = 'self'; // start as a Watch AI-vs-AI demonstration (Deadly)
   setTrickUI(true);
@@ -1705,6 +1754,15 @@ function frame(now) {
     setAim(aimDeg + aimHeldDir * AIM_BASE_DEG * accel);
   } else if (aimHoldFrames !== 0) {
     aimHoldFrames = 0;
+  }
+  // AI ball-in-hand: slide the white from the default spot to the AI's chosen placement, then line up
+  if (aiPlace && !playing) {
+    const p = Math.min(1, (now - aiPlace.start) / aiPlace.dur);
+    const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; // easeInOut
+    const pos = { x: aiPlace.from.x + (aiPlace.to.x - aiPlace.from.x) * e, y: aiPlace.from.y + (aiPlace.to.y - aiPlace.from.y) * e };
+    heldCuePos = pos;
+    setCuePiecePos(pos);
+    if (p >= 1) { const shot = aiPlace.shot; aiPlace = null; startAiLineup(shot); }
   }
   // AI lining up: morph its controls + trajectory from the naive first try to its final choice, then fire
   if (aiLineup && !playing) {

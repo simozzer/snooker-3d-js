@@ -821,6 +821,7 @@ let pauseThen = null; // 'replay' (start the replay) | 'handoff' (end replay + n
 let lastPots = [];
 let lastAngle = 0;
 const replaysOn = () => el('replays').checked;
+const pinCue = () => el('pincue').checked; // keep the free-orbit camera centred on the cue ball
 
 function pottedObjectBalls(tl) {
   const last = tl[tl.length - 1];
@@ -1747,7 +1748,11 @@ function frame(now) {
     if (then === 'replay') startReplay();
     else { endReplay(); onReplayEnd(); }
   }
-  if (!replaying && !exhibition && !shotCam) controls.update(); // don't fight the replay / exhibition / cueing camera
+  if (!replaying && !exhibition && !shotCam) {
+    // "Center view on cue ball": ease the orbit target onto the white so you rotate/zoom around it.
+    if (pinCue() && game) { const c = cueBallPos(); controls.target.lerp(P3(c.x, c.y, R), 0.25); }
+    controls.update(); // don't fight the replay / exhibition / cueing camera
+  }
   updateNets(now); // swing any pocket net that a ball has just dropped into
   renderer.render(scene, camera);
   requestAnimationFrame(frame);

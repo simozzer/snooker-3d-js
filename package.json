@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
+    "test:browser": "node --test tools/browser-smoke.mjs",
+    "test:all": "node --test && node --test tools/browser-smoke.mjs",
     "serve": "node serve.js",
     "tune": "node tools/tune.mjs"
   },

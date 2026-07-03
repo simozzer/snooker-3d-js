@@ -627,6 +627,35 @@ function resetHumanControls() {
   drawPad();
 }
 
+// A cheap "general" starting trajectory for the player's turn: aim the cue at the ghost-ball line of the
+// nearest LEGAL target toward that ball's nearest pocket. It needn't be a makeable shot — it just gives
+// the player a sensible line to fine-tune from instead of a fixed default. Returns radians, or null.
+function suggestedAim() {
+  const cue = cueBallPos();
+  const targets = (variant.aiTargets ? variant.aiTargets(game) : game.pieces).filter((p) => p && p.id !== 'cue');
+  const pockets = variant.pockets();
+  let bestAim = null, nearest = Infinity;
+  for (const t of targets) {
+    const dCue = Math.hypot(t.pos.x - cue.x, t.pos.y - cue.y);
+    if (dCue >= nearest || dCue < 1e-6) continue;
+    let np = null, npd = Infinity;
+    for (const pk of pockets) { const d = Math.hypot(pk.center.x - t.pos.x, pk.center.y - t.pos.y); if (d < npd) { npd = d; np = pk; } }
+    if (!np) continue;
+    const l = Math.hypot(np.center.x - t.pos.x, np.center.y - t.pos.y) || 1;
+    const gx = t.pos.x - (2 * R) * (np.center.x - t.pos.x) / l; // ghost-ball point behind the target
+    const gy = t.pos.y - (2 * R) * (np.center.y - t.pos.y) / l;
+    nearest = dCue;
+    bestAim = Math.atan2(gy - cue.y, gx - cue.x);
+  }
+  return bestAim;
+}
+// Point the player's aim at the suggested line as their turn opens (skipped if there's no legal target).
+function setSuggestedAim() {
+  if (!game || game.frame.frameOver || isAiTurn()) return;
+  const a = suggestedAim();
+  if (a != null) setAim((a * 180) / Math.PI);
+}
+
 // The AI "lines up" before firing: animate its control widgets AND trajectory from a naive first try
 // (its aim, 1.0 pace, no spin) to its FINAL chosen shot (its pace + spin), so a watcher sees the
 // choice form, then play it. The frame loop drives the animation (see aiLineup handling).
@@ -835,7 +864,7 @@ function newFrameGame() {
   updatePBLine();
   if (game.frame.ballInHand) beginBallInHand(); else endBallInHand(); // break = ball-in-hand
   maybeAiTurn();
-  if (!isAiTurn()) resetHumanControls();
+  if (!isAiTurn()) { resetHumanControls(); setSuggestedAim(); }
   refreshHumanPreview();
 }
 
@@ -1306,7 +1335,7 @@ function onReplayEnd() {
   }
   if (game.frame.ballInHand) beginBallInHand(); else endBallInHand(); // cue potted → place it before playing on
   maybeAiTurn();
-  if (!isAiTurn()) resetHumanControls(); // your shot → start from a reasonable first try (1.0, no spin)
+  if (!isAiTurn()) { resetHumanControls(); setSuggestedAim(); } // your shot → sensible controls + a suggested aim line
   refreshHumanPreview(); // if it's now your shot, show the aim line
 }
 
@@ -1417,7 +1446,7 @@ el('takeover').addEventListener('click', () => {
   status.textContent = 'Your turn — play on, then “Copy reply link” to send it back.';
   if (game.frame.ballInHand) beginBallInHand(); else endBallInHand();
   maybeAiTurn();
-  if (!isAiTurn()) resetHumanControls();
+  if (!isAiTurn()) { resetHumanControls(); setSuggestedAim(); }
   refreshHumanPreview();
 });
 
@@ -1431,7 +1460,7 @@ function startChallenge(token) {
   status.textContent = `Challenge — ${bar}. Your turn.`;
   updatePBLine();
   maybeAiTurn();
-  if (!isAiTurn()) resetHumanControls();
+  if (!isAiTurn()) { resetHumanControls(); setSuggestedAim(); }
   refreshHumanPreview();
 }
 

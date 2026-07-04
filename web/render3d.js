@@ -152,16 +152,21 @@ function buildTable() {
     mouth.renderOrder = 1;
     g.add(mouth);
     // a brass plate ringing each pocket, sat on the rail tops — a wide arc whose gap faces into the
-    // table (where the ball enters) so it hugs the rails around the back and sides of the mouth
+    // table (where the ball enters) so it hugs the rails around the back and sides of the mouth. The
+    // arc is centred on the OUTWARD direction: for a corner that's the 45° bisector of the two rails
+    // (Math.sign, NOT atan2 of the position — on this 2:1 rectangle the origin→corner diagonal is only
+    // ~27°, which skewed the plate off the corner); for a middle it's the rail normal (±90°). Corners
+    // wrap ~270° so the two ends run right down the cushion noses to the frame; middles stay a half-cap.
     const isCorner = Math.abs(p.center.x) > 1e-6 && Math.abs(p.center.y) > 1e-6;
-    const arcLen = isCorner ? Math.PI * 0.6 : Math.PI * 0.82; // corner: a short cap whose ends run along the two rails
+    const arcLen = isCorner ? Math.PI * 1.5 : Math.PI * 0.82; // corner: near-full wrap, ends meeting the two rails
+    const outward = Math.atan2(Math.sign(p.center.y), Math.sign(p.center.x));
     const arc = new THREE.Mesh(new THREE.TorusGeometry(mouthR * 1.02 * S, 0.013 * S, 10, 30, arcLen), brassMat);
     arc.rotation.x = Math.PI / 2; // flat; local angle θ → world (cosθ, sinθ) in the X–Z plane
     arc.castShadow = true;
     const bracket = new THREE.Group();
     bracket.add(arc);
     bracket.position.copy(P3(p.center.x, p.center.y, topZ * 0.9));
-    bracket.rotation.y = arcLen / 2 - Math.atan2(p.center.y, p.center.x); // centre the arc outward, gap facing the table
+    bracket.rotation.y = arcLen / 2 - outward; // centre the arc outward, gap facing the table
     g.add(bracket);
     pocketNets.push({ cx: p.center.x, cy: p.center.y, grp: net, jig: null });
   }

@@ -22,6 +22,8 @@ import { aiTurn, chooseShotFinish, difficultyConfig, executeShot } from '../src/
 import { build147 } from '../src/exhibition.js';
 import { getLevel, runTrickShot, findSolution, CURATED_COUNT } from '../src/trickshots.js';
 import { buildPlanCache, replayState } from './replay.js';
+import { makeStudioEnv, feltMaterial, woodMat, jawMat, pocketMat, netMat, mouthMat, markMat, spotMat, brassMat } from './materials.js';
+import { initSound, unlockAudio, knock } from './sound.js';
 import { encodeFrame, decodeFrame, verifyFrame, variantId as shareVariantId, variantById as shareVariantById } from '../src/share.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
@@ -64,7 +66,7 @@ const controls = new OrbitControls(camera, renderer.domElement);
 // A procedurally-generated soft "snooker hall" environment (no external HDR needed): a bright overhead
 // band on a cool room gradient, run through PMREM. It gives brass plates, polished wood and the balls
 // believable reflections and a gentle sheen — the single biggest lift to realism — and lights the room.
-scene.environment = makeStudioEnv();
+scene.environment = makeStudioEnv(renderer);
 scene.add(new THREE.AmbientLight(0xffffff, 0.35)); // flat base fill so the far corners never fall dark
 scene.add(new THREE.HemisphereLight(0xeaf0ff, 0x141a1f, 0.6)); // sky/ground fill lifts the shadow tone
 const key = new THREE.DirectionalLight(0xfff4e2, 1.05); // warm overhead key — casts the table shadow
@@ -101,96 +103,7 @@ function resize() {
 window.addEventListener('resize', resize);
 
 // --- static table geometry (built once) ------------------------------------------------------
-// Procedural studio environment: a bright overhead band on a cool room gradient, mapped as an
-// equirectangular reflection and pre-filtered by PMREM. Cheap, self-contained (no HDR file), and it
-// makes every metal/gloss surface read as lit by a real room.
-function makeStudioEnv() {
-  const cv = document.createElement('canvas');
-  cv.width = 512; cv.height = 256;
-  const c = cv.getContext('2d');
-  const grd = c.createLinearGradient(0, 0, 0, 256);
-  grd.addColorStop(0.0, '#3c4657'); // ceiling
-  grd.addColorStop(0.40, '#9fb0c4');
-  grd.addColorStop(0.50, '#ffffff'); // bright overhead band (the hall lights)
-  grd.addColorStop(0.60, '#9fb0c4');
-  grd.addColorStop(1.0, '#1c2128'); // floor
-  c.fillStyle = grd; c.fillRect(0, 0, 512, 256);
-  c.fillStyle = 'rgba(255,255,255,0.95)'; // a couple of soft light panels for glints
-  for (const x of [90, 250, 400]) c.fillRect(x, 34, 60, 22);
-  const tex = new THREE.CanvasTexture(cv);
-  tex.mapping = THREE.EquirectangularReflectionMapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const env = pmrem.fromEquirectangular(tex).texture;
-  tex.dispose(); pmrem.dispose();
-  return env;
-}
-
-// Woven baize: the cloth colour with fine per-texel luminance nap plus a matching bump, so the felt
-// catches light like real baize instead of reading as flat plastic. Tiled tightly and cached per colour.
-const _feltCache = new Map();
-function feltMaterial(hex) {
-  if (_feltCache.has(hex)) return _feltCache.get(hex);
-  const size = 256;
-  const base = new THREE.Color(hex);
-  const cv = document.createElement('canvas'); cv.width = cv.height = size;
-  const c = cv.getContext('2d');
-  const img = c.createImageData(size, size);
-  const bcv = document.createElement('canvas'); bcv.width = bcv.height = size;
-  const bc = bcv.getContext('2d');
-  const bimg = bc.createImageData(size, size);
-  const clamp = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
-  for (let i = 0; i < size * size; i++) {
-    const n = (Math.random() - 0.5) * 0.12; // ±nap on luminance
-    img.data[i * 4 + 0] = clamp((base.r + n) * 255);
-    img.data[i * 4 + 1] = clamp((base.g + n) * 255);
-    img.data[i * 4 + 2] = clamp((base.b + n) * 255);
-    img.data[i * 4 + 3] = 255;
-    const b = clamp(128 + (Math.random() - 0.5) * 90);
-    bimg.data[i * 4] = bimg.data[i * 4 + 1] = bimg.data[i * 4 + 2] = b;
-    bimg.data[i * 4 + 3] = 255;
-  }
-  c.putImageData(img, 0, 0); bc.putImageData(bimg, 0, 0);
-  const map = new THREE.CanvasTexture(cv);
-  map.wrapS = map.wrapT = THREE.RepeatWrapping; map.repeat.set(16, 8); map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 8;
-  const bump = new THREE.CanvasTexture(bcv);
-  bump.wrapS = bump.wrapT = THREE.RepeatWrapping; bump.repeat.set(32, 16);
-  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, map, bumpMap: bump, bumpScale: 0.012, roughness: 0.97, metalness: 0 });
-  _feltCache.set(hex, mat);
-  return mat;
-}
-
-// Polished hardwood for the outer frame: a warm base with soft vertical grain streaks. Semi-glossy so
-// it picks up the studio env (that sheen is what reads as "varnished wood").
-function woodMaterial(tone) {
-  const size = 256;
-  const cv = document.createElement('canvas'); cv.width = cv.height = size;
-  const c = cv.getContext('2d');
-  c.fillStyle = tone; c.fillRect(0, 0, size, size);
-  for (let i = 0; i < 240; i++) {
-    const x = Math.random() * size;
-    c.strokeStyle = `rgba(${20 + Math.random() * 34 | 0},${10 + Math.random() * 18 | 0},0,${(0.04 + Math.random() * 0.11).toFixed(3)})`;
-    c.lineWidth = 0.5 + Math.random() * 1.6;
-    c.beginPath();
-    c.moveTo(x, 0);
-    c.bezierCurveTo(x + (Math.random() - 0.5) * 18, size * 0.34, x + (Math.random() - 0.5) * 18, size * 0.68, x + (Math.random() - 0.5) * 10, size);
-    c.stroke();
-  }
-  const map = new THREE.CanvasTexture(cv);
-  map.wrapS = map.wrapT = THREE.RepeatWrapping; map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 8; map.repeat.set(4, 1);
-  return new THREE.MeshStandardMaterial({ color: 0xffffff, map, roughness: 0.36, metalness: 0.05 });
-}
-const woodMat = woodMaterial('#5a3a1e'); // dark polished hardwood, shared across tables
-const jawMat = new THREE.MeshStandardMaterial({ color: 0x241812, roughness: 0.55, metalness: 0.1 }); // dark leather pocket jaws
-const pocketMat = new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 });
-const netMat = new THREE.LineBasicMaterial({ color: 0x9a9a86, transparent: true, opacity: 0.72 });
-// pocket mouth: a clean, faintly luminescent disc (unlit, so it reads as softly self-lit) over the
-// green — a round glow rather than a black hole. depthWrite off so the net + resting balls show through.
-const mouthMat = new THREE.MeshBasicMaterial({ color: 0x3a5f6e, transparent: true, opacity: 0.5, depthWrite: false });
-const markMat = new THREE.LineBasicMaterial({ color: 0xdfeae0, transparent: true, opacity: 0.5 });
-const spotMat = new THREE.MeshBasicMaterial({ color: 0xdfeae0, transparent: true, opacity: 0.65 });
-const brassMat = new THREE.MeshStandardMaterial({ color: 0xc79a4b, metalness: 0.9, roughness: 0.28 }); // reflects the studio env
-
+// Procedural textures + shared materials live in materials.js (leaf module, no game state).
 function buildTable() {
   const g = new THREE.Group();
   const feltMat = feltMaterial(variant.cloth && variant.cloth.startsWith('#') ? variant.cloth : '#1f7a4d'); // per-table baize colour
@@ -1764,60 +1677,10 @@ window.addEventListener('keyup', (ev) => {
   if ((ev.key === 'ArrowLeft' && aimHeldDir === -1) || (ev.key === 'ArrowRight' && aimHeldDir === 1)) { aimHeldDir = 0; aimHoldFrames = 0; }
 });
 
-// --- sound: synthesised collision knocks (ported from the 2D renderer) --------------------------
-// A short noise burst → bandpass → fast decay, volume/brightness scaled by impact speed. Ball-ball
-// (pair) is a bright click; cushions (rail/jaw/frame) a duller knock; a bed landing a low thud.
-const soundOn = () => el('sound').checked;
-let audioCtx = null;
-let master = null; // compressor → destination, so overlapping knocks stay clean
+// --- sound: synthesised collision knocks live in sound.js (leaf WebAudio module) -----------------
+// The loop owns soundIdx (which timeline events have already sounded); the synth owns the audio graph.
 let soundIdx = 0; // last timeline event whose sound has played, during replay
-function unlockAudio() {
-  const AC = window.AudioContext || window.webkitAudioContext;
-  if (!AC) return;
-  try {
-    if (!audioCtx) {
-      audioCtx = new AC();
-      const comp = audioCtx.createDynamicsCompressor();
-      const out = audioCtx.createGain();
-      out.gain.value = 1.6;
-      comp.connect(out).connect(audioCtx.destination);
-      master = comp;
-    }
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-  } catch { /* audio unavailable */ }
-}
-function knock(kind, intensity) {
-  if (!soundOn() || !audioCtx || audioCtx.state !== 'running') return;
-  try {
-    const t = audioCtx.currentTime;
-    const cushion = kind === 'rail' || kind === 'jaw' || kind === 'frame';
-    const bed = kind === 'bed';
-    const hard = Math.max(0, Math.min(1, intensity / 3.5));
-    const len = Math.ceil(audioCtx.sampleRate * 0.05);
-    const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-    const src = audioCtx.createBufferSource();
-    src.buffer = buf;
-    const bp = audioCtx.createBiquadFilter();
-    bp.type = 'bandpass';
-    const baseHz = bed ? 320 : cushion ? 900 : 2000;
-    const spread = bed ? 200 : cushion ? 400 : 1000;
-    bp.frequency.value = baseHz * (0.9 + Math.random() * 0.2) + hard * spread;
-    bp.Q.value = bed ? 3 : cushion ? 4 : 8;
-    const g = audioCtx.createGain();
-    const peak = (bed ? 0.8 : cushion ? 1.1 : 1.4) * Math.max(bed ? 0.18 : 0.28, hard);
-    g.gain.setValueAtTime(Math.max(0.0003, peak), t);
-    g.gain.exponentialRampToValueAtTime(0.0003, t + (cushion ? 0.06 : bed ? 0.07 : 0.04));
-    src.connect(bp).connect(g).connect(master || audioCtx.destination);
-    src.start(t);
-    src.stop(t + 0.08);
-  } catch { /* ignore a dropped knock */ }
-}
-// browsers require a user gesture to start audio — resume on the first one, then stop listening
-const unlockOnce = () => { unlockAudio(); window.removeEventListener('pointerdown', unlockOnce, true); window.removeEventListener('keydown', unlockOnce, true); };
-window.addEventListener('pointerdown', unlockOnce, true);
-window.addEventListener('keydown', unlockOnce, true);
+initSound(() => el('sound').checked); // resume audio on first gesture; knock() honours the Sound toggle
 el('sound').addEventListener('change', unlockAudio);
 
 // --- 147 exhibition + video recording --------------------------------------------------------

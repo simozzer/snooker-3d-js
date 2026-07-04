@@ -27,6 +27,7 @@ import { initSound, unlockAudio, knock } from './sound.js';
 import { makeBallMesh } from './balls3d.js';
 import { buildTable, kickNet, updateNets, NET_DEPTH } from './table3d.js';
 import { createPreview } from './preview3d.js';
+import { driveReplayCamera } from './replaycam.js';
 import { encodeFrame, decodeFrame, verifyFrame, variantId as shareVariantId, variantById as shareVariantById } from '../src/share.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
@@ -825,62 +826,8 @@ function skipReplay() {
   onReplayEnd();
 }
 
-// Frame the whole story: sit at the treatment's angle, far enough back that EVERY potted ball and the
-// cue's line stay in view, with a slow push-in + gentle orbit for cinematic life. Static framing (only
-// distance/orbit ease) → inherently smooth (no per-frame chase jitter); dt-based damping keeps it
-// frame-rate independent.
-const HALF_TAN = Math.tan(((45 * Math.PI) / 180) / 2); // camera vertical half-FOV
-function driveReplayCamera(state, dt) {
-  const rm = replayInfo;
-  const p = Math.min(1, simT / rm.end); // replay progress 0→1
-  if (rm.swivel) { driveSwivelCamera(state, dt, p); return; }
-  const fit = (rm.radius / HALF_TAN) * 1.25 + rm.radius; // distance that frames `radius` with margin
-  const dist = fit * (1.32 - 0.3 * p); // slow push-in over the replay
-  const ang = rm.orbit * p; // gentle orbit
-  const c = Math.cos(ang);
-  const s = Math.sin(ang);
-  const d = rm.dir;
-  const dir = new THREE.Vector3(d.x * c - d.z * s, d.y, d.x * s + d.z * c); // rotate `dir` about the Y axis
-  const dPos = rm.center.clone().addScaledVector(dir, dist);
-  const dTgt = rm.center;
-  if (!rm.init) { rm.camPos.copy(dPos); rm.camTgt.copy(dTgt); rm.init = true; }
-  else {
-    const kP = 1 - Math.exp(-dt / 0.3); // exponential damping (frame-rate independent)
-    const kT = 1 - Math.exp(-dt / 0.2);
-    rm.camPos.lerp(dPos, kP);
-    rm.camTgt.lerp(dTgt, kT);
-  }
-  camera.position.copy(rm.camPos);
-  camera.lookAt(rm.camTgt);
-}
-
-// The rare swivel treatment: sweep a big arc around the vertical axis through the action while the look
-// pans toward the ball we're chasing — dynamic angle changes, but always orbiting at the framing distance
-// so every collision and final position stays in view (never the tight crop of a true follow-cam). The
-// azimuth is driven by replay progress `p` (warped by replayRate), so it slows around the pot.
-const SWIVEL_EH = 0.87, SWIVEL_EV = 0.5; // cos/sin of the ~30° orbit elevation
-function driveSwivelCamera(state, dt, p) {
-  const rm = replayInfo;
-  const fit = (rm.radius / HALF_TAN) * 1.5 + rm.radius; // wider margin than the static frame: the look is off-centre
-  const f = state.get(rm.followId);
-  const ball = f ? P3(f.pos.x, f.pos.y, f.pos.z) : rm.center.clone();
-  const dTgt = rm.center.clone().lerp(ball, 0.35); // bias the look toward the chased ball, but keep the action framed
-  const az = rm.swivelBase + rm.swivelDir * p * Math.PI * 1.7; // most of a full turn across the whole replay
-  const dPos = new THREE.Vector3(
-    rm.center.x + Math.cos(az) * fit * SWIVEL_EH,
-    fit * SWIVEL_EV, // elevated above the table
-    rm.center.z + Math.sin(az) * fit * SWIVEL_EH,
-  );
-  if (!rm.init) { rm.camPos.copy(dPos); rm.camTgt.copy(dTgt); rm.init = true; }
-  else {
-    const kP = 1 - Math.exp(-dt / 0.3);
-    const kT = 1 - Math.exp(-dt / 0.2);
-    rm.camPos.lerp(dPos, kP);
-    rm.camTgt.lerp(dTgt, kT);
-  }
-  camera.position.copy(rm.camPos);
-  camera.lookAt(rm.camTgt);
-}
+// The pot-replay cinematic camera (static push-in/orbit + rare swivel) lives in replaycam.js. The
+// renderer builds replayInfo (framing/state) in startReplay and drives it each frame from the loop.
 
 // --- cueing shot presentation (live play only) -----------------------------------------------
 // When a shot is struck, hold the balls at the start, show it from behind the cue ball down the aim
@@ -1762,7 +1709,7 @@ function frame(now) {
     }
     const state = replayState(timeline, planCache, simT);
     applyState(state, simDt);
-    if (replaying) driveReplayCamera(state, dt);
+    if (replaying) driveReplayCamera(camera, replayInfo, state, dt, simT, P3);
     else if (exhibition) driveExhibitionCamera(dt);
     else if (shotCam) driveShotCamWatch(dt); // risen broadcast view as the shot runs
     if (ended) {

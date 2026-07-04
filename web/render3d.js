@@ -55,19 +55,36 @@ scene.background = new THREE.Color(0x0d1116);
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap; // soft, penumbra-ish shadows
+renderer.toneMapping = THREE.ACESFilmicToneMapping; // filmic response so highlights on brass/balls don't clip
+renderer.toneMappingExposure = 1.05;
 view.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-const key = new THREE.DirectionalLight(0xffffff, 0.9);
+// A procedurally-generated soft "snooker hall" environment (no external HDR needed): a bright overhead
+// band on a cool room gradient, run through PMREM. It gives brass plates, polished wood and the balls
+// believable reflections and a gentle sheen — the single biggest lift to realism — and lights the room.
+scene.environment = makeStudioEnv();
+scene.add(new THREE.HemisphereLight(0xeaf0ff, 0x141a1f, 0.42)); // sky/ground fill lifts the shadow tone
+const key = new THREE.DirectionalLight(0xfff4e2, 1.05); // warm overhead key — casts the table shadow
 key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.bias = -0.00018;
 scene.add(key);
+const fill = new THREE.DirectionalLight(0xbcd4ff, 0.22); // cool low fill from the opposite side
+scene.add(fill);
 
 // Frame the camera + key light to the current table size (recalled when the variant changes, so a
 // smaller pool table is zoomed in appropriately).
 function frameCamera() {
   camera.position.set(0, HY * S * 2.4, HY * S * 3.0);
-  key.position.set(HX * S, HY * S * 2, HY * S);
+  key.position.set(HX * S * 0.6, HY * S * 2.6, HY * S * 1.2);
+  fill.position.set(-HX * S, HY * S * 1.4, -HY * S * 1.2);
+  // fit the key light's shadow camera to the table so 2048² resolution isn't wasted on empty space
+  const sc = key.shadow.camera;
+  const r = Math.max(HX, HY) * S * 1.6;
+  sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 1; sc.far = HY * S * 8;
+  sc.updateProjectionMatrix();
   controls.target.set(0, 0, 0);
   controls.update();
 }
@@ -83,9 +100,87 @@ function resize() {
 window.addEventListener('resize', resize);
 
 // --- static table geometry (built once) ------------------------------------------------------
-const cloth = new THREE.MeshStandardMaterial({ color: 0x1f7a4d, roughness: 0.9 });
-const railMat = new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.7 });
-const jawMat = new THREE.MeshStandardMaterial({ color: 0x3a2817, roughness: 0.6 });
+// Procedural studio environment: a bright overhead band on a cool room gradient, mapped as an
+// equirectangular reflection and pre-filtered by PMREM. Cheap, self-contained (no HDR file), and it
+// makes every metal/gloss surface read as lit by a real room.
+function makeStudioEnv() {
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 256;
+  const c = cv.getContext('2d');
+  const grd = c.createLinearGradient(0, 0, 0, 256);
+  grd.addColorStop(0.0, '#3c4657'); // ceiling
+  grd.addColorStop(0.40, '#9fb0c4');
+  grd.addColorStop(0.50, '#ffffff'); // bright overhead band (the hall lights)
+  grd.addColorStop(0.60, '#9fb0c4');
+  grd.addColorStop(1.0, '#1c2128'); // floor
+  c.fillStyle = grd; c.fillRect(0, 0, 512, 256);
+  c.fillStyle = 'rgba(255,255,255,0.95)'; // a couple of soft light panels for glints
+  for (const x of [90, 250, 400]) c.fillRect(x, 34, 60, 22);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const env = pmrem.fromEquirectangular(tex).texture;
+  tex.dispose(); pmrem.dispose();
+  return env;
+}
+
+// Woven baize: the cloth colour with fine per-texel luminance nap plus a matching bump, so the felt
+// catches light like real baize instead of reading as flat plastic. Tiled tightly and cached per colour.
+const _feltCache = new Map();
+function feltMaterial(hex) {
+  if (_feltCache.has(hex)) return _feltCache.get(hex);
+  const size = 256;
+  const base = new THREE.Color(hex);
+  const cv = document.createElement('canvas'); cv.width = cv.height = size;
+  const c = cv.getContext('2d');
+  const img = c.createImageData(size, size);
+  const bcv = document.createElement('canvas'); bcv.width = bcv.height = size;
+  const bc = bcv.getContext('2d');
+  const bimg = bc.createImageData(size, size);
+  const clamp = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
+  for (let i = 0; i < size * size; i++) {
+    const n = (Math.random() - 0.5) * 0.12; // ±nap on luminance
+    img.data[i * 4 + 0] = clamp((base.r + n) * 255);
+    img.data[i * 4 + 1] = clamp((base.g + n) * 255);
+    img.data[i * 4 + 2] = clamp((base.b + n) * 255);
+    img.data[i * 4 + 3] = 255;
+    const b = clamp(128 + (Math.random() - 0.5) * 90);
+    bimg.data[i * 4] = bimg.data[i * 4 + 1] = bimg.data[i * 4 + 2] = b;
+    bimg.data[i * 4 + 3] = 255;
+  }
+  c.putImageData(img, 0, 0); bc.putImageData(bimg, 0, 0);
+  const map = new THREE.CanvasTexture(cv);
+  map.wrapS = map.wrapT = THREE.RepeatWrapping; map.repeat.set(16, 8); map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 8;
+  const bump = new THREE.CanvasTexture(bcv);
+  bump.wrapS = bump.wrapT = THREE.RepeatWrapping; bump.repeat.set(32, 16);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, map, bumpMap: bump, bumpScale: 0.012, roughness: 0.97, metalness: 0 });
+  _feltCache.set(hex, mat);
+  return mat;
+}
+
+// Polished hardwood for the outer frame: a warm base with soft vertical grain streaks. Semi-glossy so
+// it picks up the studio env (that sheen is what reads as "varnished wood").
+function woodMaterial(tone) {
+  const size = 256;
+  const cv = document.createElement('canvas'); cv.width = cv.height = size;
+  const c = cv.getContext('2d');
+  c.fillStyle = tone; c.fillRect(0, 0, size, size);
+  for (let i = 0; i < 240; i++) {
+    const x = Math.random() * size;
+    c.strokeStyle = `rgba(${20 + Math.random() * 34 | 0},${10 + Math.random() * 18 | 0},0,${(0.04 + Math.random() * 0.11).toFixed(3)})`;
+    c.lineWidth = 0.5 + Math.random() * 1.6;
+    c.beginPath();
+    c.moveTo(x, 0);
+    c.bezierCurveTo(x + (Math.random() - 0.5) * 18, size * 0.34, x + (Math.random() - 0.5) * 18, size * 0.68, x + (Math.random() - 0.5) * 10, size);
+    c.stroke();
+  }
+  const map = new THREE.CanvasTexture(cv);
+  map.wrapS = map.wrapT = THREE.RepeatWrapping; map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 8; map.repeat.set(4, 1);
+  return new THREE.MeshStandardMaterial({ color: 0xffffff, map, roughness: 0.36, metalness: 0.05 });
+}
+const woodMat = woodMaterial('#5a3a1e'); // dark polished hardwood, shared across tables
+const jawMat = new THREE.MeshStandardMaterial({ color: 0x241812, roughness: 0.55, metalness: 0.1 }); // dark leather pocket jaws
 const pocketMat = new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 });
 const netMat = new THREE.LineBasicMaterial({ color: 0x9a9a86, transparent: true, opacity: 0.72 });
 // pocket mouth: a clean, faintly luminescent disc (unlit, so it reads as softly self-lit) over the
@@ -93,27 +188,31 @@ const netMat = new THREE.LineBasicMaterial({ color: 0x9a9a86, transparent: true,
 const mouthMat = new THREE.MeshBasicMaterial({ color: 0x3a5f6e, transparent: true, opacity: 0.5, depthWrite: false });
 const markMat = new THREE.LineBasicMaterial({ color: 0xdfeae0, transparent: true, opacity: 0.5 });
 const spotMat = new THREE.MeshBasicMaterial({ color: 0xdfeae0, transparent: true, opacity: 0.65 });
-const brassMat = new THREE.MeshStandardMaterial({ color: 0xb5893a, metalness: 0.85, roughness: 0.34 });
+const brassMat = new THREE.MeshStandardMaterial({ color: 0xc79a4b, metalness: 0.9, roughness: 0.28 }); // reflects the studio env
 
 function buildTable() {
   const g = new THREE.Group();
+  const feltMat = feltMaterial(variant.cloth && variant.cloth.startsWith('#') ? variant.cloth : '#1f7a4d'); // per-table baize colour
   // bed: a thin slab whose OUTLINE is bitten inward at each pocket (a semicircle on the rails, a
   // quarter arc at each corner), so the pocket mouths are real openings cut through the cloth — the
   // green stops at the mouth circle instead of showing under it. Pockets sit on the boundary, so this
   // notched-outline (not boundary-crossing holes) triangulates cleanly with no leak past the border.
-  const bed = new THREE.Mesh(new THREE.ExtrudeGeometry(bedShape(), { depth: 0.02 * S, bevelEnabled: false }), cloth);
+  const bed = new THREE.Mesh(new THREE.ExtrudeGeometry(bedShape(), { depth: 0.02 * S, bevelEnabled: false }), feltMat);
   bed.rotation.x = Math.PI / 2; // shape (x,y) → world (x,z); top surface at y=0, slab extends down
   bed.receiveShadow = true;
   g.add(bed);
 
-  // finite-height straight cushions: a box per rail cylinder, spanning its along-axis extent, sat
-  // on the bed and rising to the cushion top (topZ). Its inner face marks where balls rebound.
+  // finite-height straight cushions, CLOTH-COVERED (same baize as the bed) like a real table: a box per
+  // rail cylinder spanning its along-axis extent, sat on the bed and rising to the cushion top (topZ).
+  // Its inner face marks where balls rebound. A slim chamfer strip along the inner-top edge gives the
+  // cushion a nose that catches the light instead of a flat wall.
+  const cushThick = 0.06;
   for (const rail of railCylinders(R, B, variant.pockets())) {
     const [lo, hi] = rail.span;
     const len = (hi - lo) * S;
-    const thick = 0.06 * S;
+    const thick = cushThick * S;
     const height = topZ * S;
-    const box = new THREE.Mesh(new THREE.BoxGeometry(rail.axis === 'x' ? len : thick, height, rail.axis === 'x' ? thick : len), railMat);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(rail.axis === 'x' ? len : thick, height, rail.axis === 'x' ? thick : len), feltMat);
     const alongMid = (lo + hi) / 2;
     // sit the cushion just OUTSIDE the rebound line (perp), so its inner face is at the table edge
     const perpOut = rail.perp + Math.sign(rail.perp) * thick / (2 * S);
@@ -121,7 +220,42 @@ function buildTable() {
     const cy = rail.axis === 'x' ? perpOut : alongMid;
     box.position.copy(P3(cx, cy, topZ / 2));
     box.castShadow = true;
+    box.receiveShadow = true;
     g.add(box);
+  }
+
+  // Outer WOODEN FRAME: a polished hardwood border ringing the cushions — the part you'd rest your hand
+  // on and where the sight spots sit. Four boxes (top/bottom span the full width, left/right fit
+  // between them) form a clean rectangle just OUTSIDE the cushions; the pocket openings stay inboard of
+  // it, so no cutouts are needed. Small sight spots are inlaid along the top face.
+  {
+    const frameW = 0.14; // border width (m)
+    const frameH = topZ * 1.45; // a touch taller than the cushions
+    const innerX = HX + cushThick;
+    const innerY = HY + cushThick; // frame starts where the cushions end
+    const addBox = (w, d, cx, cy) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, frameH * S, d), woodMat);
+      m.position.copy(P3(cx, cy, frameH / 2));
+      m.castShadow = true; m.receiveShadow = true;
+      g.add(m);
+    };
+    const outerX = innerX + frameW;
+    addBox(outerX * 2 * S, frameW * S, 0, innerY + frameW / 2); // top
+    addBox(outerX * 2 * S, frameW * S, 0, -(innerY + frameW / 2)); // bottom
+    addBox(frameW * S, innerY * 2 * S, innerX + frameW / 2, 0); // right
+    addBox(frameW * S, innerY * 2 * S, -(innerX + frameW / 2), 0); // left
+    // sight spots: the classic mother-of-pearl dots, three along each long rail, on the frame top
+    const dotMat = new THREE.MeshStandardMaterial({ color: 0xf3ecd8, roughness: 0.3, metalness: 0.1 });
+    const dotY = frameH + 0.001;
+    const railMidY = innerY + frameW / 2;
+    for (const fx of [-HX / 2, 0, HX / 2]) {
+      for (const sy of [railMidY, -railMidY]) {
+        const dot = new THREE.Mesh(new THREE.CircleGeometry(0.012 * S, 16), dotMat);
+        dot.rotation.x = -Math.PI / 2;
+        dot.position.copy(P3(fx, sy, dotY));
+        g.add(dot);
+      }
+    }
   }
 
   // rounded pocket jaws: a torus per jaw (matching the physics torus: ring radius + tube), lying in

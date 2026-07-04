@@ -1062,6 +1062,11 @@ controls.addEventListener('start', () => { if (aimView()) { aimReframe = false; 
 
 // The human's shot from the sliders (aim/power/spin/elevation). Ball-in-hand uses the default D spot.
 function humanShot() {
+  // A pot replay is showing (or in its pre-beat / post-hold, when `playing` is briefly false): Play must
+  // NOT fire a phantom shot — it acts as "skip the replay", like tapping the table or pressing a key.
+  // Without this, activating Play during that window fired a shot into the just-cleared table, fouling,
+  // flipping the turn, and re-arming another replay → the reported replay loop + scrambled turns.
+  if (replaying || pauseThen === 'replay' || pauseThen === 'handoff') { skipReplay(); return; }
   if (playing || sharedReplay) return;
   if (trick) { cancelTrickAuto(); if (!trick.awaiting) playTrickShot(sliderShot()); return; }
   if (isAiTurn() || game.frame.frameOver) return;

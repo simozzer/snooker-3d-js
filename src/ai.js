@@ -71,6 +71,11 @@ const POSITION_WEIGHT = 36;
 //     nestling defensively. Raise it for a more defensive AI, lower it for a more aggressive one.
 const SAFETY_WEIGHT = 30;
 const SAFETY_TRIGGER = 0.22;
+// A genuine SNOOKER — the opponent has NO direct line to any ball-on, so they must escape off a cushion
+// or foul (conceding 4+) — is worth more than a merely awkward-but-hittable leave. Added ON TOP of the
+// safety term when the leave snookers, so the AI actively HUNTS snookers, not just no-pot leaves. Kept
+// below a ball's value (100) so a real pot is always preferred; only bites when nothing is on to score.
+const SNOOKER_WEIGHT = 48;
 // 2-ply look-ahead: reward a red-pot whose leave on the black ALSO recovers a red after the black
 // is potted — i.e. it keeps the red→black→red cycle (a 147) alive. Weighted below the single-ply
 // leave so it only refines among already-good lines.
@@ -105,6 +110,22 @@ function pathClear(A, B, blockers, clearance, skip1, skip2) {
     if (segPointDist(A.x, A.y, B.x, B.y, b.pos.x, b.pos.y) < clearance) return false;
   }
   return true;
+}
+
+// Is the player to strike from `cuePos` SNOOKERED — no direct straight line to ANY ball-on (every path
+// is blocked by a ball that isn't on)? A snooker forces an escape off a cushion or a foul, so laying
+// one is the prize of defensive play. Uses the same 2R corridor test as the pot proxy, skipping the
+// cue and the target itself as "blockers". `state` carries the ball-on set via variant.aiTargets — so
+// pass the ADVANCED (post-shot, turn-flipped) state to ask "is the OPPONENT snookered?".
+export function opponentSnookered(state, cuePos) {
+  const variant = state.variant;
+  const targets = variant.aiTargets(state);
+  if (!targets.length) return false;
+  const clearance = 2 * variant.ball.radius - 1e-3;
+  for (const T of targets) {
+    if (pathClear(cuePos, T.pos, state.pieces, clearance, 'cue', T.id)) return false; // a clean contact exists
+  }
+  return true; // no ball-on can be struck directly
 }
 
 // Best makeable next pot from `cuePos`, as a [0,1] pot-probability proxy. Considers every legal
@@ -196,14 +217,17 @@ function positionBonus(state, res, pieceById, adv = false) {
     return POSITION_WEIGHT * prob;
   }
 
-  // A legal MISS: the turn passes, so `prob` here is the OPPONENT's best next pot from the layout
-  // we leave. SAFETY PLAY — only pays off when it leaves the opponent genuinely stuck (best pot
-  // below SAFETY_TRIGGER); a weak safety that still leaves a chance earns nothing, so the AI
-  // attacks instead of nestling. Deadly + snooker only; others keep the roll-to-target fallback.
+  // A legal MISS: the turn passes, so `prob` here is the OPPONENT's best next pot from the layout we
+  // leave. SAFETY PLAY, two tiers: a low-pot leave (best pot below SAFETY_TRIGGER) earns the graded
+  // safety term; a genuine SNOOKER (no direct line to any ball-on → forced escape/foul) earns
+  // SNOOKER_WEIGHT on top, so the AI hunts snookers rather than nestling for a merely awkward leave.
+  // Deadly + snooker only; other variants keep the roll-to-target fallback.
   if (!adv || !variant.safetyPlay) return 0;
   const oppProb = Math.min(1, prob);
-  if (oppProb >= SAFETY_TRIGGER) return 0;
-  return SAFETY_WEIGHT * (1 - oppProb / SAFETY_TRIGGER);
+  let bonus = 0;
+  if (oppProb < SAFETY_TRIGGER) bonus += SAFETY_WEIGHT * (1 - oppProb / SAFETY_TRIGGER);
+  if (opponentSnookered(nextState, { x: cueBall.pos.x, y: cueBall.pos.y })) bonus += SNOOKER_WEIGHT;
+  return bonus;
 }
 
 function scoreOutcome(state, res, pieceById, adv = false) {
@@ -348,6 +372,50 @@ function cycleBonus(state, shot) {
   return LOOKAHEAD2_WEIGHT * bestRed;
 }
 
+// Safety / snooker search (deadly|hard + snooker): when NO makeable pot exists, don't just dribble the
+// cue at the nearest ball — try to leave the OPPONENT stuck, ideally SNOOKERED. For the nearest few
+// ball-on targets, sweep contact thickness (thin edge → full ball) × pace × spin, simulate each to
+// rest, and score the LEAVE with the snooker-aware safety term (scoreOutcome → positionBonus, advanced).
+// Illegal outcomes (miss the ball-on, in-off) score hundreds below any legal leave, so only legal
+// safeties survive; among them the one that snookers (or leaves the least on) wins. Returns the best
+// executable shot, or null if there was nothing legal to try (caller falls back to the plain roll-out).
+function safetyShots(state) {
+  const variant = state.variant;
+  const R = variant.ball.radius;
+  const cue = state.pieces.find((p) => p.id === 'cue');
+  const cuePos = state.frame.ballInHand || !cue ? variant.defaultPlacement(state) : cue.pos;
+  const { pieces, pieceById } = cuePieces(state, cuePos);
+  // Consider only the nearest handful of ball-on targets: the realistic safety is played on a ball you
+  // can reach cleanly, and this bounds the cost (this whole pass only runs on a no-pot turn).
+  const targets = variant.aiTargets(state)
+    .map((T) => ({ T, d2: (T.pos.x - cuePos.x) ** 2 + (T.pos.y - cuePos.y) ** 2 }))
+    .sort((a, b) => a.d2 - b.d2)
+    .slice(0, 6)
+    .map((x) => x.T);
+  const paces = [0.7, 1.05, 1.5, 2.1, 2.9]; // gentle roll → firm, so the cue can settle in many spots
+  const spins = [{ side: 0, vert: 0 }, { side: 0, vert: 0.5 }, { side: 0, vert: -0.5 }, { side: 0.5, vert: 0 }, { side: -0.5, vert: 0 }];
+  const thickness = [-0.85, -0.5, 0, 0.5, 0.85]; // thin edge … full … thin edge, as a fraction of the contact half-width
+  let best = null;
+  for (const T of targets) {
+    const toT = v.sub(T.pos, cuePos);
+    const d = v.len(toT);
+    if (d < 2 * R) continue; // already in contact
+    const base = Math.atan2(toT.y, toT.x);
+    const half = Math.asin(Math.min(0.999, (2 * R) / d)); // angular half-width that still grazes the target
+    for (const f of thickness) {
+      const angle = base + f * half;
+      for (const sp of paces) {
+        const speed = Math.min(MAX_SPEED, sp);
+        for (const spin of spins) {
+          const score = simScoreP(state, pieces, pieceById, angle, speed, spin, true);
+          if (!best || score > best.score) best = { cuePos, angle, speed, spin, score };
+        }
+      }
+    }
+  }
+  return best;
+}
+
 // Pick a shot. Returns { cuePos, angle, speed, spin:{side,vert}, score }. The caller maps
 // cuePos → cuePlacement when the frame owes ball-in-hand. opts: maxCandidates / powerScales /
 // angleOffsets / spins (search), robust:{ angleErr, speedPct, keep } (play-to-reliability), and
@@ -433,6 +501,15 @@ export function chooseShotFinish(state, opts, scored) {
     }
   }
   if (best && best.score > 0) return best;
+
+  // No makeable pot: play the best available SAFETY — try to snooker the opponent — before the blind
+  // roll-out. Deadly/hard + snooker only; other variants keep the simple fallback. The safety search
+  // scores by the leave, so a shot that snookers (or leaves nothing on) beats one that opens the table.
+  // A legal safety scores ≥ 0 (illegal ones sink to −300+), so the > −50 gate keeps only legal lines.
+  if (adv && variant.safetyPlay) {
+    const safe = safetyShots(state);
+    if (safe && safe.score > -50 && (!best || safe.score > best.score)) return safe;
+  }
 
   // No clean pot found: roll toward the nearest legal target (avoids a no-hit foul).
   const cue = state.pieces.find((p) => p.id === 'cue');

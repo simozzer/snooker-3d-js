@@ -843,6 +843,19 @@ function updateScore() {
   const highStr = bcast.high >= 2 ? `high: ${bcast.high}${bcast.highBy != null ? ` (${playerLabel(bcast.highBy)})` : ''}` : '';
   const bl = el('breakline'); if (bl) bl.textContent = [brkStr, highStr].filter(Boolean).join('   ·   ');
   syncTurnUI();
+  updateTurnPrompt();
+}
+
+// A big, unmissable "it's your turn — here's your immediate goal" prompt, shown only when a human is
+// idle and on strike (not the AI, not mid-shot, not Trick Shots). Goal text comes from variant.turnGoal.
+function updateTurnPrompt() {
+  const p = el('turnprompt'); if (!p) return;
+  const yours = game && !trick && !playing && !aiLineup && !aiPlace && !sharedReplay && !game.frame.frameOver && !isAiTurn();
+  if (!yours) { p.className = ''; p.textContent = ''; return; }
+  const who = aiEnabled() ? '▶ YOUR TURN' : `▶ PLAYER ${game.frame.turn + 1} — YOUR TURN`;
+  const goal = variant.turnGoal ? variant.turnGoal(game.frame) : (variant.centerText ? variant.centerText(game.frame) : '');
+  p.innerHTML = `${who}${goal ? `<span class="goal">Goal: ${escHtml(goal)}</span>` : ''}`;
+  p.className = 'show';
 }
 
 // Player-only controls (trajectories, new frame, share link) are irrelevant while the AI is on strike —

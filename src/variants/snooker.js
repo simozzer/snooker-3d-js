@@ -185,6 +185,14 @@ export const snooker = {
   // --- HUD ---
   sideValue: (frame, i) => String(frame.scores[i]),
   centerText: (frame) => (frame.frameOver ? '' : `on: ${ballOn(frame) ?? '—'}`),
+  // A plain-language "what to do next" for the player whose turn it is.
+  turnGoal: (frame) => {
+    const on = ballOn(frame);
+    if (!on) return '';
+    if (on === 'red') return 'pot a red';
+    if (on === 'any-colour') return 'pot any colour';
+    return `pot the ${on}`;
+  },
 };
 
 // Free spot for a re-spotted colour: its own spot, else the higher-value spots, else step back

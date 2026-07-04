@@ -252,4 +252,8 @@ export const pool = {
     if (frame.open) return 'open table';
     return onGroup(frame, frame.turn) === 'eight' ? 'on the 8' : `${frame.assigned[frame.turn]}s`;
   },
+  turnGoal(frame) {
+    if (frame.open) return 'table open — pot a ball to claim a group';
+    return onGroup(frame, frame.turn) === 'eight' ? 'pot the 8 to win' : `pot a ${frame.assigned[frame.turn]}`;
+  },
 };

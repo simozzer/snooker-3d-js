@@ -47,6 +47,12 @@
       @keyframes replaypop { from { transform: translateX(-50%) scale(.7); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
       /* broadcast HUD: running break sub-line + a big celebratory banner */
       #breakline { font-size: 12px; color: #8fb3d0; min-height: 15px; margin-top: -6px; letter-spacing: .3px; }
+      /* crystal-clear "it's your turn" prompt with the immediate goal */
+      #turnprompt { display: none; padding: 9px 12px; border-radius: 8px; background: linear-gradient(90deg,#1f7a4d,#26935d);
+        color: #eafff3; font-weight: 800; font-size: 13.5px; letter-spacing: .4px; box-shadow: 0 0 0 1px rgba(120,230,170,.25), 0 3px 12px rgba(20,120,70,.35); }
+      #turnprompt.show { display: block; animation: turnpulse 2.2s ease-in-out infinite; }
+      #turnprompt .goal { display: block; font-weight: 600; font-size: 12px; color: #cdeedb; margin-top: 2px; letter-spacing: .2px; }
+      @keyframes turnpulse { 0%,100% { box-shadow: 0 0 0 1px rgba(120,230,170,.25), 0 3px 12px rgba(20,120,70,.35); } 50% { box-shadow: 0 0 0 1px rgba(120,230,170,.6), 0 3px 18px rgba(30,160,95,.6); } }
       #version { position: absolute; top: 10px; left: 12px; z-index: 5; pointer-events: none; user-select: none;
         font-size: 12px; font-weight: 600; letter-spacing: .5px; color: #6f8496; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
       #bcastbanner { position: absolute; top: 16%; left: 50%; transform: translateX(-50%); z-index: 4; pointer-events: none;
@@ -86,6 +92,7 @@
           <h1>SNOOKER · 3D · vs AI</h1>
           <div class="hint">Deterministic engine decides &amp; resolves; this only draws. Physics untouched.</div>
         </div>
+        <div id="turnprompt"></div>
         <div id="scores" style="font-size:14px;font-weight:600;color:#cfe0ee;"></div>
         <div id="breakline"></div>
         <div id="pbline" style="font-size:11px;color:#c9a94a;min-height:14px;"></div>

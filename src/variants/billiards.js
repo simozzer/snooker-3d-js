@@ -173,4 +173,5 @@ export const billiards = {
 
   sideValue: (frame, i) => String(frame.scores[i]),
   centerText: (frame) => (frame.frameOver ? '' : `to ${frame.target}`),
+  turnGoal: () => 'score — a cannon, a pot, or an in-off',
 };

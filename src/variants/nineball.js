@@ -185,4 +185,5 @@ export const nineball = {
 
   sideValue: () => '—',
   centerText: (frame) => (frame.frameOver ? '' : `on: ${lowest(frame)}`),
+  turnGoal: (frame) => `hit the ${lowest(frame)} first — pot anything (the 9 wins)`,
 };

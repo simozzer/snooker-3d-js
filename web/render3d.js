@@ -26,6 +26,7 @@ import { makeStudioEnv } from './materials.js';
 import { initSound, unlockAudio, knock } from './sound.js';
 import { makeBallMesh } from './balls3d.js';
 import { buildTable, kickNet, updateNets, NET_DEPTH } from './table3d.js';
+import { createPreview } from './preview3d.js';
 import { encodeFrame, decodeFrame, verifyFrame, variantId as shareVariantId, variantById as shareVariantById } from '../src/share.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
@@ -330,35 +331,11 @@ refreshLabels();
 const TRAJECTORY = { none: 0, immediate: 2, full: Infinity };
 const trajectoryDepth = () => TRAJECTORY[el('trajectory')?.value] ?? TRAJECTORY.full;
 
-const previewGroup = new THREE.Group();
-scene.add(previewGroup);
-const cueLineMat = new THREE.LineBasicMaterial({ color: 0xf5f3ea, transparent: true, opacity: 0.9 });
-const objLineMat = new THREE.LineDashedMaterial({ color: 0xbcd3e6, transparent: true, opacity: 0.5, dashSize: 0.6, gapSize: 0.4 });
-
-function clearPreview() {
-  for (const c of previewGroup.children) c.geometry.dispose();
-  previewGroup.clear();
-}
-
-// Sample every ball's predicted path from a capped sim into scene-space polylines. We subdivide each
-// inter-event interval so curved segments (spin swerve, flight arcs) read smoothly while the exact
-// event points stay as crisp corners; pocketed/off samples are dropped so a line stops at its pot.
-function samplePreview(res) {
-  const tl = res.timeline;
-  const paths = new Map();
-  if (tl.length < 2) return paths;
-  const cache = buildPlanCache(tl, R);
-  const push = (id, v) => { (paths.get(id) ?? paths.set(id, []).get(id)).push(v); };
-  const SUB = 8;
-  const addAt = (t) => { for (const [id, s] of replayState(tl, cache, t)) if (!s.pocketed) push(id, P3(s.pos.x, s.pos.y, s.pos.z)); };
-  for (let e = 0; e < tl.length - 1; e++) {
-    const t0 = tl[e].t;
-    const t1 = tl[e + 1].t;
-    for (let s = 0; s < SUB; s++) addAt(t0 + (t1 - t0) * (s / SUB));
-  }
-  addAt(tl[tl.length - 1].t);
-  return paths;
-}
+// Preview drawing (group + materials + sampling/draw) lives in preview3d.js; thin wrappers keep the call
+// sites here unchanged. samplePreview passes the current variant R (which changes per variant).
+const preview = createPreview(scene, P3);
+const clearPreview = () => preview.clear();
+const samplePreview = (res) => preview.sample(res, R);
 
 // Build the balls the way takeShot would (cue placed if the frame owes ball-in-hand), run a capped
 // non-committing sim of `shot`, and return the sampled paths. Pure prediction — never mutates game.
@@ -379,16 +356,7 @@ function computePreviewPaths(shot, depth) {
   return samplePreview(res);
 }
 
-function drawPreviewPaths(paths) {
-  clearPreview();
-  for (const [id, pts] of paths) {
-    if (pts.length < 2) continue;
-    const isCue = id === 'cue';
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), isCue ? cueLineMat : objLineMat);
-    if (!isCue) line.computeLineDistances(); // required for the dashed material
-    previewGroup.add(line);
-  }
-}
+const drawPreviewPaths = (paths) => preview.draw(paths);
 
 // The shot the human's sliders currently describe (also what humanShot fires).
 function sliderShot() {

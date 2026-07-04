@@ -22,8 +22,10 @@ import { aiTurn, chooseShotFinish, difficultyConfig, executeShot } from '../src/
 import { build147 } from '../src/exhibition.js';
 import { getLevel, runTrickShot, findSolution, CURATED_COUNT } from '../src/trickshots.js';
 import { buildPlanCache, replayState } from './replay.js';
-import { makeStudioEnv, feltMaterial, woodMat, jawMat, pocketMat, netMat, mouthMat, markMat, spotMat, brassMat } from './materials.js';
+import { makeStudioEnv } from './materials.js';
 import { initSound, unlockAudio, knock } from './sound.js';
+import { makeBallMesh } from './balls3d.js';
+import { buildTable, kickNet, updateNets, NET_DEPTH } from './table3d.js';
 import { encodeFrame, decodeFrame, verifyFrame, variantId as shareVariantId, variantById as shareVariantById } from '../src/share.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
@@ -102,250 +104,23 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
-// --- static table geometry (built once) ------------------------------------------------------
-// Procedural textures + shared materials live in materials.js (leaf module, no game state).
-function buildTable() {
-  const g = new THREE.Group();
-  const feltMat = feltMaterial(variant.cloth && variant.cloth.startsWith('#') ? variant.cloth : '#1f7a4d'); // per-table baize colour
-  // bed: a thin slab whose OUTLINE is bitten inward at each pocket (a semicircle on the rails, a
-  // quarter arc at each corner), so the pocket mouths are real openings cut through the cloth — the
-  // green stops at the mouth circle instead of showing under it. Pockets sit on the boundary, so this
-  // notched-outline (not boundary-crossing holes) triangulates cleanly with no leak past the border.
-  const bed = new THREE.Mesh(new THREE.ExtrudeGeometry(bedShape(), { depth: 0.02 * S, bevelEnabled: false }), feltMat);
-  bed.rotation.x = Math.PI / 2; // shape (x,y) → world (x,z); top surface at y=0, slab extends down
-  bed.receiveShadow = true;
-  g.add(bed);
-
-  // finite-height straight cushions, CLOTH-COVERED (same baize as the bed) like a real table: a box per
-  // rail cylinder spanning its along-axis extent, sat on the bed and rising to the cushion top (topZ).
-  // Its inner face marks where balls rebound. A slim chamfer strip along the inner-top edge gives the
-  // cushion a nose that catches the light instead of a flat wall.
-  const cushThick = 0.06;
-  for (const rail of railCylinders(R, B, variant.pockets())) {
-    const [lo, hi] = rail.span;
-    const len = (hi - lo) * S;
-    const thick = cushThick * S;
-    const height = topZ * S;
-    const box = new THREE.Mesh(new THREE.BoxGeometry(rail.axis === 'x' ? len : thick, height, rail.axis === 'x' ? thick : len), feltMat);
-    const alongMid = (lo + hi) / 2;
-    // sit the cushion just OUTSIDE the rebound line (perp), so its inner face is at the table edge
-    const perpOut = rail.perp + Math.sign(rail.perp) * thick / (2 * S);
-    const cx = rail.axis === 'x' ? alongMid : perpOut;
-    const cy = rail.axis === 'x' ? perpOut : alongMid;
-    box.position.copy(P3(cx, cy, topZ / 2));
-    box.castShadow = true;
-    box.receiveShadow = true;
-    g.add(box);
-  }
-
-  // Outer WOODEN FRAME: a polished hardwood border ringing the cushions — the part you'd rest your hand
-  // on and where the sight spots sit. Four boxes (top/bottom span the full width, left/right fit
-  // between them) form a clean rectangle just OUTSIDE the cushions; the pocket openings stay inboard of
-  // it, so no cutouts are needed. Small sight spots are inlaid along the top face.
-  {
-    const frameW = 0.14; // border width (m)
-    const frameH = topZ * 1.45; // a touch taller than the cushions
-    const innerX = HX + cushThick;
-    const innerY = HY + cushThick; // frame starts where the cushions end
-    const addBox = (w, d, cx, cy) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, frameH * S, d), woodMat);
-      m.position.copy(P3(cx, cy, frameH / 2));
-      m.castShadow = true; m.receiveShadow = true;
-      g.add(m);
-    };
-    const outerX = innerX + frameW;
-    addBox(outerX * 2 * S, frameW * S, 0, innerY + frameW / 2); // top
-    addBox(outerX * 2 * S, frameW * S, 0, -(innerY + frameW / 2)); // bottom
-    addBox(frameW * S, innerY * 2 * S, innerX + frameW / 2, 0); // right
-    addBox(frameW * S, innerY * 2 * S, -(innerX + frameW / 2), 0); // left
-    // sight spots: the classic mother-of-pearl dots, three along each long rail, on the frame top
-    const dotMat = new THREE.MeshStandardMaterial({ color: 0xf3ecd8, roughness: 0.3, metalness: 0.1 });
-    const dotY = frameH + 0.001;
-    const railMidY = innerY + frameW / 2;
-    for (const fx of [-HX / 2, 0, HX / 2]) {
-      for (const sy of [railMidY, -railMidY]) {
-        const dot = new THREE.Mesh(new THREE.CircleGeometry(0.012 * S, 16), dotMat);
-        dot.rotation.x = -Math.PI / 2;
-        dot.position.copy(P3(fx, sy, dotY));
-        g.add(dot);
-      }
-    }
-  }
-
-  // rounded pocket jaws: a torus per jaw (matching the physics torus: ring radius + tube), lying in
-  // the horizontal plane at nose height, so the curled nose reads around each mouth.
-  for (const jaw of pocketJaws(R, B, variant.pockets())) {
-    const t = new THREE.Mesh(new THREE.TorusGeometry(jaw.Rring * S, jaw.tube * S, 10, 24), jawMat);
-    t.rotation.x = Math.PI / 2; // torus default is in xy-plane (three) → lay it flat (horizontal)
-    t.position.copy(P3(jaw.cx, jaw.cy, jaw.z));
-    g.add(t);
-  }
-
-  // each pocket: a dark floor deep in the bag (so the recess reads from any angle) and a baggy string
-  // net hung from the mouth. The mouth itself is the real hole in the bed, so the net shows from above.
-  pocketNets = [];
-  for (const p of variant.pockets()) {
-    const mouthR = p.mouth ?? p.radius;
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(mouthR * 1.2 * S, 24), pocketMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.copy(P3(p.center.x, p.center.y, -NET_DEPTH - 0.01));
-    g.add(floor);
-    const net = buildNet(mouthR); // pivots at the rim, so it swings when a ball drops in
-    net.position.copy(P3(p.center.x, p.center.y, 0));
-    g.add(net);
-    // translucent circular mouth: makes the pocket read as a round hole (vs green cloth) without hiding the net
-    const mouth = new THREE.Mesh(new THREE.CircleGeometry(mouthR * S, 28), mouthMat);
-    mouth.rotation.x = -Math.PI / 2;
-    mouth.position.copy(P3(p.center.x, p.center.y, 0.002));
-    mouth.renderOrder = 1;
-    g.add(mouth);
-    // a brass plate ringing each pocket, sat on the rail tops — a wide arc whose gap faces into the
-    // table (where the ball enters) so it hugs the rails around the back and sides of the mouth. The
-    // arc is centred on the OUTWARD direction: for a corner that's the 45° bisector of the two rails
-    // (Math.sign, NOT atan2 of the position — on this 2:1 rectangle the origin→corner diagonal is only
-    // ~27°, which skewed the plate off the corner); for a middle it's the rail normal (±90°). Corners
-    // wrap ~270° so the two ends run right down the cushion noses to the frame; middles stay a half-cap.
-    const isCorner = Math.abs(p.center.x) > 1e-6 && Math.abs(p.center.y) > 1e-6;
-    const arcLen = isCorner ? Math.PI * 1.5 : Math.PI * 0.82; // corner: near-full wrap, ends meeting the two rails
-    const outward = Math.atan2(Math.sign(p.center.y), Math.sign(p.center.x));
-    const arc = new THREE.Mesh(new THREE.TorusGeometry(mouthR * 1.02 * S, 0.013 * S, 10, 30, arcLen), brassMat);
-    arc.rotation.x = Math.PI / 2; // flat; local angle θ → world (cosθ, sinθ) in the X–Z plane
-    arc.castShadow = true;
-    const bracket = new THREE.Group();
-    bracket.add(arc);
-    bracket.position.copy(P3(p.center.x, p.center.y, topZ * 0.9));
-    bracket.rotation.y = arcLen / 2 - outward; // centre the arc outward, gap facing the table
-    g.add(bracket);
-    pocketNets.push({ cx: p.center.x, cy: p.center.y, grp: net, jig: null });
-  }
-
-  // painted cloth markings (baulk line / D / spots for snooker; head string + spots for pool & 9-ball),
-  // laid just above the bed. Each variant owns its own geometry via markings().
-  if (variant.markings) {
-    const mk = variant.markings();
-    const MY = 0.004; // sit just above the bed to avoid z-fighting
-    const polyline = (ptsPhys) => g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ptsPhys.map((p) => P3(p.x, p.y, MY))), markMat));
-    for (const seg of mk.lines ?? []) polyline(seg);
-    for (const arc of mk.arcs ?? []) {
-      const pts = [];
-      for (let i = 0; i <= 40; i++) { const a = arc.a0 + (arc.a1 - arc.a0) * (i / 40); pts.push({ x: arc.cx + Math.cos(a) * arc.r, y: arc.cy + Math.sin(a) * arc.r }); }
-      polyline(pts);
-    }
-    for (const sp of mk.spots ?? []) {
-      const dot = new THREE.Mesh(new THREE.CircleGeometry(0.011 * S, 14), spotMat);
-      dot.rotation.x = -Math.PI / 2;
-      dot.position.copy(P3(sp.x, sp.y, MY));
-      g.add(dot);
-    }
-  }
-  return g;
-}
-// A small string basket: strands from the mouth ring taper to a narrow bottom. Local origin at the
-// mouth (world y=0) so it swings when a ball drops in.
-const NET_DEPTH = 0.12; // bag depth (m)
-function buildNet(mouthR) {
-  const N = 14;
-  const D = NET_DEPTH;
-  const rings = [{ y: -0.004, r: mouthR * 0.96 }, { y: -D * 0.4, r: mouthR * 0.8 }, { y: -D * 0.72, r: mouthR * 0.55 }, { y: -D, r: mouthR * 0.32 }];
-  const node = (ri, i) => { const a = (i / N) * Math.PI * 2; return new THREE.Vector3(Math.cos(a) * rings[ri].r * S, rings[ri].y * S, Math.sin(a) * rings[ri].r * S); };
-  const pts = [];
-  for (let i = 0; i < N; i++) for (let ri = 0; ri < rings.length - 1; ri++) pts.push(node(ri, i), node(ri + 1, i)); // strands
-  for (let ri = 1; ri < rings.length; ri++) for (let i = 0; i < N; i++) pts.push(node(ri, i), node(ri, (i + 1) % N)); // hoops
-  return new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), netMat);
-}
-const TABLE_W = () => B.maxX - B.minX;
-const TABLE_H = () => B.maxY - B.minY;
-
-// The table bed outline (scene units) with each pocket mouth bitten inward — a simple closed polygon
-// (no holes), so the openings cut cleanly through the slab. Walks the perimeter counterclockwise,
-// arcing into the table around each pocket centre by its mouth radius; every arc bulges inward.
-function bedShape() {
-  const pk = variant.pockets();
-  const rAt = (x, y) => { const p = pk.find((q) => Math.abs(q.center.x - x) < 1e-6 && Math.abs(q.center.y - y) < 1e-6); return (p.mouth ?? p.radius) * S; };
-  const [cbl, cbr, ctr, ctl, mb, mt] = [rAt(-HX, -HY), rAt(HX, -HY), rAt(HX, HY), rAt(-HX, HY), rAt(0, -HY), rAt(0, HY)];
-  const x = HX * S;
-  const y = HY * S;
-  const P = Math.PI;
-  const sh = new THREE.Shape();
-  sh.moveTo(-x + cbl, -y);
-  sh.lineTo(-mb, -y);
-  sh.absarc(0, -y, mb, P, 0, true); // bottom-middle
-  sh.lineTo(x - cbr, -y);
-  sh.absarc(x, -y, cbr, P, P / 2, true); // bottom-right corner
-  sh.lineTo(x, y - ctr);
-  sh.absarc(x, y, ctr, (3 * P) / 2, P, true); // top-right corner
-  sh.lineTo(mt, y);
-  sh.absarc(0, y, mt, 0, -P, true); // top-middle
-  sh.lineTo(-x + ctl, y);
-  sh.absarc(-x, y, ctl, 0, -P / 2, true); // top-left corner
-  sh.lineTo(-x, -y + cbl);
-  sh.absarc(-x, -y, cbl, P / 2, 0, true); // bottom-left corner
-  sh.closePath();
-  return sh;
-}
+// --- static table geometry (materials.js + table3d.js) ---------------------------------------
+// The table mesh + nets are built in table3d.js from a small geometry context; the renderer keeps the
+// nets array (pocket-bag layout + swing) and the tableGroup handle.
 let pocketNets = []; // [{ cx, cy, grp, jig }] — string baskets that swing when a ball drops in
 let tableGroup = null;
-
-// A ball has just dropped into the pocket nearest (cx,cy) moving at (vx,vy): swing that net like a
-// pendulum in the ball's direction, decaying over ~1.5 s. Amplitude scales with the drop speed.
-function kickNet(cx, cy, vx, vy, speed) {
-  let best = null;
-  let bd = Infinity;
-  for (const n of pocketNets) { const d = Math.hypot(n.cx - cx, n.cy - cy); if (d < bd) { bd = d; best = n; } }
-  if (!best) return;
-  const dir = new THREE.Vector3(vx, 0, vy);
-  if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
-  const axis = new THREE.Vector3(0, 1, 0).cross(dir.normalize()).normalize(); // horizontal, ⟂ to impact
-  best.jig = { t0: performance.now(), amp: Math.min(0.5, speed * 0.09), axis };
-}
-function updateNets(now) {
-  for (const n of pocketNets) {
-    if (!n.jig) continue;
-    const e = (now - n.jig.t0) / 1000;
-    if (e > 1.5) { n.grp.quaternion.identity(); n.jig = null; continue; }
-    n.grp.quaternion.setFromAxisAngle(n.jig.axis, n.jig.amp * Math.exp(-4 * e) * Math.cos(14 * e)); // damped swing
-  }
-}
 function rebuildTable() {
   if (tableGroup) { scene.remove(tableGroup); tableGroup.traverse((o) => o.geometry?.dispose?.()); }
-  tableGroup = buildTable();
+  const built = buildTable({ variant, S, R, B, HX, HY, topZ, P3 }); // geometry context (recomputed per variant)
+  tableGroup = built.group;
+  pocketNets = built.nets;
   scene.add(tableGroup);
 }
 rebuildTable();
 
 // --- balls -----------------------------------------------------------------------------------
-// Appearance is variant-driven: `colorOf` gives each ball's colour, `isStripe` marks a stripe (drawn
-// white with a coloured equatorial band), and `label` gives its number (drawn as a camera-facing
-// decal). Snooker balls are plain coloured spheres with a spin spot; pool/9-ball balls are numbered.
-// Each ball is an OUTER group (positioned) holding a number decal + an INNER "spinner" group (the
-// sphere/band/spot) that rotates to show spin — so the number stays put while the ball rolls.
-const CUE_FALLBACK = '#f5f3ea';
-
-function ballColor(piece) {
-  const isCue = piece.group === 'cue' || piece.id === 'cue';
-  if (isCue) return new THREE.Color(variant.cueColor && variant.cueColor.startsWith('#') ? variant.cueColor : CUE_FALLBACK);
-  return new THREE.Color(variant.colorOf ? variant.colorOf(piece) : '#cccccc');
-}
-// A camera-facing number decal (like a real pool ball's number circle), readable from any angle.
-function numberSprite(text) {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 64;
-  const c = cv.getContext('2d');
-  c.fillStyle = '#f7f5ee';
-  c.beginPath();
-  c.arc(32, 32, 27, 0, Math.PI * 2);
-  c.fill();
-  c.fillStyle = '#141414';
-  c.font = `bold ${text.length > 1 ? 30 : 38}px system-ui, sans-serif`;
-  c.textAlign = 'center';
-  c.textBaseline = 'middle';
-  c.fillText(text, 32, 35);
-  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv) }));
-  const s = R * S * 0.95;
-  spr.scale.set(s, s, s);
-  spr.position.set(0, R * S * 0.5, 0);
-  return spr;
-}
+// Ball appearance (variant-driven mesh construction) lives in balls3d.js; the renderer owns the
+// registry (ballMeshes) and the per-frame positioning/spin below.
 let ballMeshes = new Map(); // id → { grp, spinner }
 
 // The cue stick — shown only while a live shot is being cued (behind the cue ball, striking down the
@@ -362,36 +137,12 @@ const cueStick = new THREE.Group();
 cueStick.visible = false;
 scene.add(cueStick);
 
-function makeBallMesh(piece) {
-  const grp = new THREE.Group(); // outer: positioned only
-  const spinner = new THREE.Group(); // inner: rotates to show spin
-  grp.add(spinner);
-  const col = ballColor(piece);
-  const stripe = variant.isStripe ? variant.isStripe(piece) : false;
-  const base = stripe ? new THREE.Color(CUE_FALLBACK) : col; // a stripe = white ball + a coloured band
-  const sphere = new THREE.Mesh(new THREE.SphereGeometry(R * S, 28, 20), new THREE.MeshStandardMaterial({ color: base, roughness: 0.18 }));
-  sphere.castShadow = true;
-  spinner.add(sphere);
-  if (stripe) {
-    const band = new THREE.Mesh(new THREE.SphereGeometry(R * S * 1.003, 28, 12, 0, Math.PI * 2, Math.PI * 0.36, Math.PI * 0.28), new THREE.MeshStandardMaterial({ color: col, roughness: 0.18 }));
-    spinner.add(band);
-  }
-  const label = variant.label ? variant.label(piece) : '';
-  if (label) {
-    grp.add(numberSprite(label)); // numbered ball: a camera-facing decal (doesn't spin with the ball)
-  } else {
-    const spot = new THREE.Mesh(new THREE.SphereGeometry(R * S * 0.28, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffffff }));
-    spot.position.set(0, R * S * 0.92, 0);
-    spinner.add(spot); // spin spot rolls with the ball
-  }
-  return { grp, spinner };
-}
 function syncBallMeshes(pieces) {
   const ids = new Set(pieces.map((p) => p.id));
   for (const [id, m] of ballMeshes) if (!ids.has(id)) { scene.remove(m.grp); ballMeshes.delete(id); }
   for (const p of pieces) {
     if (!ballMeshes.has(p.id)) {
-      const m = makeBallMesh(p);
+      const m = makeBallMesh(p, variant, R, S);
       scene.add(m.grp);
       ballMeshes.set(p.id, m);
     }
@@ -2032,7 +1783,7 @@ function frame(now) {
         const fin = timeline[timeline.length - 1].balls.find((x) => x.id === s.hit.id);
         if (fin && fin.pocketed && !fin.cleared) { // a genuine drop (not a rattle/rebound) → swing the net
           const b = s.balls.find((x) => x.id === s.hit.id);
-          if (b) kickNet(b.pos.x, b.pos.y, b.vel.x, b.vel.y, Math.hypot(b.vel.x, b.vel.y));
+          if (b) kickNet(pocketNets, b.pos.x, b.pos.y, b.vel.x, b.vel.y, Math.hypot(b.vel.x, b.vel.y));
         }
       }
     }
@@ -2075,7 +1826,7 @@ function frame(now) {
     }
   }
   lastAimDeg = aimDeg;
-  updateNets(now); // swing any pocket net that a ball has just dropped into
+  updateNets(pocketNets, now); // swing any pocket net that a ball has just dropped into
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }

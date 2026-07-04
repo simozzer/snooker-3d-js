@@ -1713,6 +1713,7 @@ function dragCueTo(ev) {
   if (t && variant.placementLegal(game, t.x, t.y)) { heldCuePos = { x: t.x, y: t.y }; setCuePiecePos(heldCuePos); refreshHumanPreview(); }
 }
 renderer.domElement.addEventListener('pointerdown', (ev) => {
+  if (replaying || pauseThen === 'replay') { skipReplay(); return; } // tap the table to skip a pot replay (like any key)
   aimDown = { x: ev.clientX, y: ev.clientY };
   grabCue = !playing && !sharedReplay && !isAiTurn() && nearCue(ev);
   if (grabCue) { controls.enabled = false; try { renderer.domElement.setPointerCapture(ev.pointerId); } catch { /* non-capturable */ } dragCueTo(ev); }

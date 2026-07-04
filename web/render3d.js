@@ -768,6 +768,7 @@ let frameShots = [];
 let sharedReplay = null; // { shots, i } while watching a shared frame back
 let sharedFrame = null;  // the decoded frame being watched (persists so "Take over" works after it ends)
 let challenge = null;    // { target } while playing a "beat this" challenge (?challenge=)
+let shotIsAi = false;    // was the settling shot a game-AI shot? (pot replays are skipped for those)
 
 // --- broadcast HUD: running break, session-high, celebratory banners -------------------------
 // A "break" is the run a player builds in one unbroken visit — points in snooker/billiards
@@ -841,6 +842,15 @@ function updateScore() {
   const brkStr = bcast.brk >= 2 && bcast.owner != null ? `${playerLabel(bcast.owner)} break: ${bcast.brk}` : '';
   const highStr = bcast.high >= 2 ? `high: ${bcast.high}${bcast.highBy != null ? ` (${playerLabel(bcast.highBy)})` : ''}` : '';
   const bl = el('breakline'); if (bl) bl.textContent = [brkStr, highStr].filter(Boolean).join('   ·   ');
+  syncTurnUI();
+}
+
+// Player-only controls (trajectories, new frame, share link) are irrelevant while the AI is on strike —
+// hide them then. Trick Shots owns these controls itself, so leave that mode alone.
+function syncTurnUI() {
+  if (trick) return;
+  const aiOnStrike = !!game && (!!aiLineup || !!aiPlace || (playing ? shotIsAi : isAiTurn()));
+  for (const id of ['row-trajectory', 'newframe', 'sharelink']) { const e = el(id); if (e) e.style.display = aiOnStrike ? 'none' : ''; }
 }
 
 function newFrameGame() {
@@ -991,6 +1001,7 @@ function startReplay() {
 
 // TV-director pacing: fast-forward the dead rolling, slow to a crawl around every collision, and go
 // slowest of all right at the pot. Rate is a smooth function of the time to the nearest event.
+const TRICK_REPLAY_SLOW = 0.55; // Trick Shots pot-replays play back slower, to admire the shot
 function replayRate(t) {
   const rm = replayInfo;
   let nearest = Infinity;
@@ -1227,6 +1238,7 @@ function humanShot() {
   if (playing || sharedReplay) return;
   if (trick) { cancelTrickAuto(); if (!trick.awaiting) playTrickShot(sliderShot()); return; }
   if (isAiTurn() || game.frame.frameOver) return;
+  shotIsAi = false;
   playShot(sliderShot());
 }
 
@@ -1323,7 +1335,7 @@ function onReplayEnd() {
   if (sharedReplay) { // watching a shared frame back → chain the next recorded shot
     sharedReplay.i += 1;
     if (!game.frame.frameOver && sharedReplay.i < sharedReplay.shots.length) {
-      setTimeout(() => { if (sharedReplay) playShot(sharedReplay.shots[sharedReplay.i]); }, 600);
+      setTimeout(() => { if (sharedReplay) { shotIsAi = false; playShot(sharedReplay.shots[sharedReplay.i]); } }, 600);
     } else { sharedReplay = null; status.textContent = 'Shared frame complete — New frame to play your own.'; }
     return;
   }
@@ -1406,7 +1418,7 @@ function startSharedReplay(decoded) {
   sharedReplay = { shots: decoded.shots, i: 0 };
   el('takeover').style.display = '';
   status.textContent = `Shared frame — ${decoded.shots.length} shot${decoded.shots.length === 1 ? '' : 's'} · watching`;
-  if (decoded.shots.length) playShot(decoded.shots[0]);
+  if (decoded.shots.length) { shotIsAi = false; playShot(decoded.shots[0]); }
   else { sharedReplay = null; status.textContent = 'Shared position — Take over to play on.'; }
 }
 
@@ -1779,6 +1791,7 @@ function armTrickAuto(index) {
 function setTrickUI(on) {
   el('trickpanel').style.display = on ? 'block' : 'none';
   for (const id of ['newframe', 'sharelink', 'scores', 'breakline', 'pbline']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
+  const rt = el('row-trajectory'); if (rt) rt.style.display = ''; // trajectories stay available while aiming a trick
   // Trick Shots runs as a hands-off "Watch AI vs AI" demonstration → show but LOCK the opponent to it
   // (difficulty is locked to Deadly by syncDifficultyUI when self-play is active).
   el('aimode').disabled = on;
@@ -1969,7 +1982,7 @@ function frame(now) {
     };
     showShotOnControls(disp);
     if (trajectoryDepth() > 0) drawPreviewPaths(computePreviewPaths(disp, trajectoryDepth()));
-    if (p >= 1) { const shot = aiLineup.final; aiLineup = null; playShot(shot); }
+    if (p >= 1) { const shot = aiLineup.final; aiLineup = null; shotIsAi = true; playShot(shot); }
   }
   if (playing && timeline.length) {
     if (shotCam && !shotCam.struck && !replaying && !exhibition) {
@@ -1978,7 +1991,7 @@ function frame(now) {
       driveShotCamCueing(now);
     } else {
     // a replay warps time (slow-mo the pot, fast-forward the dead rolling); the live pass is 1×
-    const simDt = dt * (replaying ? replayRate(simT) : 1);
+    const simDt = dt * (replaying ? replayRate(simT) * (trick ? TRICK_REPLAY_SLOW : 1) : 1); // trick replays play slower
     simT += simDt;
     const activeEnd = replaying ? replayInfo.end : endT; // a replay cuts just after the pot
     let ended = false;
@@ -2006,7 +2019,7 @@ function frame(now) {
       if (shotCam) endShotCam(); // hand the camera back to the orbit controls (target is already centre)
       if (exhibition) nextExhibitionStep(); // 147 montage → next pot (no replays/rules)
       else if (replaying) { pauseUntil = now + 800; pauseThen = 'handoff'; } // hold on the pot (badge up), then hand off
-      else if (replaysOn() && lastPots.length) { pauseUntil = now + 500; pauseThen = 'replay'; } // a beat, then replay
+      else if (replaysOn() && lastPots.length && (trick || !shotIsAi)) { pauseUntil = now + 500; pauseThen = 'replay'; } // pot replay: human shots + trick shots, never the AI's
       else onReplayEnd();
     }
     }

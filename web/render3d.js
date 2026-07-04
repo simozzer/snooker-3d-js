@@ -57,7 +57,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap; // soft, penumbra-ish shadows
 renderer.toneMapping = THREE.ACESFilmicToneMapping; // filmic response so highlights on brass/balls don't clip
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.15;
 view.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 
@@ -65,7 +65,8 @@ const controls = new OrbitControls(camera, renderer.domElement);
 // band on a cool room gradient, run through PMREM. It gives brass plates, polished wood and the balls
 // believable reflections and a gentle sheen — the single biggest lift to realism — and lights the room.
 scene.environment = makeStudioEnv();
-scene.add(new THREE.HemisphereLight(0xeaf0ff, 0x141a1f, 0.42)); // sky/ground fill lifts the shadow tone
+scene.add(new THREE.AmbientLight(0xffffff, 0.35)); // flat base fill so the far corners never fall dark
+scene.add(new THREE.HemisphereLight(0xeaf0ff, 0x141a1f, 0.6)); // sky/ground fill lifts the shadow tone
 const key = new THREE.DirectionalLight(0xfff4e2, 1.05); // warm overhead key — casts the table shadow
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);

@@ -372,14 +372,25 @@ function cycleBonus(state, shot) {
   return LOOKAHEAD2_WEIGHT * bestRed;
 }
 
-// Safety / snooker search (deadly|hard + snooker): when NO makeable pot exists, don't just dribble the
-// cue at the nearest ball — try to leave the OPPONENT stuck, ideally SNOOKERED. For the nearest few
-// ball-on targets, sweep contact thickness (thin edge → full ball) × pace × spin, simulate each to
-// rest, and score the LEAVE with the snooker-aware safety term (scoreOutcome → positionBonus, advanced).
-// Illegal outcomes (miss the ball-on, in-off) score hundreds below any legal leave, so only legal
-// safeties survive; among them the one that snookers (or leaves the least on) wins. Returns the best
-// executable shot, or null if there was nothing legal to try (caller falls back to the plain roll-out).
-function safetyShots(state) {
+// Safety-search breadth, scaled per difficulty IN STEP with the pot-search breadth (NARROW→MID→FULL):
+// a weaker AI weighs fewer, coarser defensive lines and — like its pot search — keeps it PLAIN-BALL
+// (no side/screw), while a stronger one sweeps wider with spin to find a tighter snooker. Execution
+// noise then further separates the tiers (a beginner mis-hits the thin contact a snooker needs). Every
+// tier still gets the SAME snooker-aware SCORING (positionBonus/SNOOKER_WEIGHT) — defensive intent is
+// universal; only how hard it searches for, and how well it executes, the safety scales.
+const SAFETY_FULL = { targets: 6, thickness: [-0.85, -0.5, 0, 0.5, 0.85], paces: [0.7, 1.05, 1.5, 2.1, 2.9], spins: [{ side: 0, vert: 0 }, { side: 0, vert: 0.5 }, { side: 0, vert: -0.5 }, { side: 0.5, vert: 0 }, { side: -0.5, vert: 0 }] };
+const SAFETY_MID = { targets: 4, thickness: [-0.7, 0, 0.7], paces: [0.9, 1.4, 2.1], spins: [{ side: 0, vert: 0 }] };
+const SAFETY_NARROW = { targets: 3, thickness: [-0.6, 0, 0.6], paces: [1.1, 1.9], spins: [{ side: 0, vert: 0 }] };
+
+// Safety / snooker search (any advanced tier + snooker): when NO makeable pot exists, don't just
+// dribble the cue at the nearest ball — try to leave the OPPONENT stuck, ideally SNOOKERED. For the
+// nearest few ball-on targets, sweep contact thickness (thin edge → full ball) × pace × spin from the
+// `breadth`, simulate each to rest, and score the LEAVE with the snooker-aware safety term (scoreOutcome
+// → positionBonus, advanced). Illegal outcomes (miss the ball-on, in-off) score hundreds below any
+// legal leave, so only legal safeties survive; among them the one that snookers (or leaves the least
+// on) wins. Returns the best executable shot, or null if there was nothing legal to try (caller falls
+// back to the plain roll-out). `breadth` defaults to the full grid for direct callers / tests.
+function safetyShots(state, breadth = SAFETY_FULL, robust = null) {
   const variant = state.variant;
   const R = variant.ball.radius;
   const cue = state.pieces.find((p) => p.id === 'cue');
@@ -390,30 +401,60 @@ function safetyShots(state) {
   const targets = variant.aiTargets(state)
     .map((T) => ({ T, d2: (T.pos.x - cuePos.x) ** 2 + (T.pos.y - cuePos.y) ** 2 }))
     .sort((a, b) => a.d2 - b.d2)
-    .slice(0, 6)
+    .slice(0, breadth.targets)
     .map((x) => x.T);
-  const paces = [0.7, 1.05, 1.5, 2.1, 2.9]; // gentle roll → firm, so the cue can settle in many spots
-  const spins = [{ side: 0, vert: 0 }, { side: 0, vert: 0.5 }, { side: 0, vert: -0.5 }, { side: 0.5, vert: 0 }, { side: -0.5, vert: 0 }];
-  const thickness = [-0.85, -0.5, 0, 0.5, 0.85]; // thin edge … full … thin edge, as a fraction of the contact half-width
-  let best = null;
+  const scored = [];
   for (const T of targets) {
     const toT = v.sub(T.pos, cuePos);
     const d = v.len(toT);
     if (d < 2 * R) continue; // already in contact
     const base = Math.atan2(toT.y, toT.x);
     const half = Math.asin(Math.min(0.999, (2 * R) / d)); // angular half-width that still grazes the target
-    for (const f of thickness) {
-      const angle = base + f * half;
-      for (const sp of paces) {
+    for (const f of breadth.thickness) {
+      const angle = base + f * half; // thin edge … full … thin edge, as a fraction of the contact half-width
+      for (const sp of breadth.paces) {
         const speed = Math.min(MAX_SPEED, sp);
-        for (const spin of spins) {
-          const score = simScoreP(state, pieces, pieceById, angle, speed, spin, true);
-          if (!best || score > best.score) best = { cuePos, angle, speed, spin, score };
+        for (const spin of breadth.spins) {
+          scored.push({ cuePos, angle, speed, spin, score: simScoreP(state, pieces, pieceById, angle, speed, spin, true) });
         }
       }
     }
   }
-  return best;
+  if (!scored.length) return null;
+  scored.sort((a, b) => b.score - a.score);
+
+  // Play-to-reliability (same idea as chooseShotFinish's robust pass): a SHAKY hand must not commit to a
+  // knife-edge thin snooker it will miss and foul — re-rank the top safeties by blending the mean with
+  // the WORST perturbed outcome over the tier's aim/pace error, so a forgiving thick safety beats a
+  // brittle perfect one. Skipped at zero noise (deadly), which then commits to the tightest snooker.
+  if (robust && (robust.angleErr > 0 || robust.speedPct > 0)) {
+    const keep = Math.min(6, scored.length);
+    // Use the tier's ACTUAL hand noise (not the FORGIVE_* floor the pot pass uses): a snooker is an
+    // inherently precise shot, so a steady hand (hard) should still back a tight one, while a shaky
+    // hand (easy) is pushed onto a fuller, more forgiving safety.
+    const aM = robust.angleErr;
+    const sM = robust.speedPct;
+    let best = null;
+    for (const c of scored.slice(0, keep)) {
+      let sum = c.score;
+      let worst = c.score;
+      let n = 1;
+      for (const da of [-1, 0, 1]) {
+        for (const ds of [-1, 0, 1]) {
+          if (da === 0 && ds === 0) continue;
+          const speed = Math.max(0.4, Math.min(MAX_SPEED, c.speed * (1 + ds * sM)));
+          const s = simScore(state, c.cuePos, c.angle + da * aM, speed, c.spin, true);
+          sum += s;
+          if (s < worst) worst = s;
+          n += 1;
+        }
+      }
+      const score = (1 - FORGIVE_WORST_W) * (sum / n) + FORGIVE_WORST_W * worst;
+      if (!best || score > best.score) best = { ...c, score };
+    }
+    return best;
+  }
+  return scored[0];
 }
 
 // Pick a shot. Returns { cuePos, angle, speed, spin:{side,vert}, score }. The caller maps
@@ -507,7 +548,7 @@ export function chooseShotFinish(state, opts, scored) {
   // scores by the leave, so a shot that snookers (or leaves nothing on) beats one that opens the table.
   // A legal safety scores ≥ 0 (illegal ones sink to −300+), so the > −50 gate keeps only legal lines.
   if (adv && variant.safetyPlay) {
-    const safe = safetyShots(state);
+    const safe = safetyShots(state, opts.safety, opts.robust); // opts.safety scales search breadth; opts.robust = the tier's hand noise
     if (safe && safe.score > -50 && (!best || safe.score > best.score)) return safe;
   }
 
@@ -582,14 +623,14 @@ export function applyError(shot, { angleErr = 0, speedPct = 0 } = {}, rng = Math
 // (zero noise, which also skips the play-to-reliability re-rank so it commits to the best line); hard
 // plays it with a small shake, so it's the same smarts a touch less accurately. Ported from the 2D
 // renderer's `deadly` profile.
-const FULL_SEARCH = { maxCandidates: 18, powerScales: [0.8, 0.95, 1.1, 1.3, 1.6], angleOffsets: [-0.012, -0.006, 0, 0.006, 0.012], spins: [{ side: 0, vert: 0 }, { side: 0, vert: 0.6 }, { side: 0, vert: -0.6 }, { side: 0.5, vert: 0 }, { side: -0.5, vert: 0 }], advanced: true };
+const FULL_SEARCH = { maxCandidates: 18, powerScales: [0.8, 0.95, 1.1, 1.3, 1.6], angleOffsets: [-0.012, -0.006, 0, 0.006, 0.012], spins: [{ side: 0, vert: 0 }, { side: 0, vert: 0.6 }, { side: 0, vert: -0.6 }, { side: 0.5, vert: 0 }, { side: -0.5, vert: 0 }], advanced: true, safety: SAFETY_FULL };
 // Medium and easy run the SAME advanced planner (positioning, safety, self-pocket avoidance) but over
 // a narrower, PLAIN-BALL search: NO spin (a beginner-to-club player keeps it simple — and spinning the
 // cue is what made the lower tiers look clumsy), fewer candidate lines, and a shakier hand — so they
 // attempt the smart shots to a lesser degree. Breadth steps 8 → 12 → 18 (easy → medium → hard/deadly);
 // only hard and deadly use spin.
-const MID_SEARCH = { maxCandidates: 12, powerScales: [0.85, 1.0, 1.25, 1.6], angleOffsets: [-0.012, -0.006, 0, 0.006, 0.012], spins: [{ side: 0, vert: 0 }], advanced: true };
-const NARROW_SEARCH = { maxCandidates: 8, powerScales: [0.85, 1.1, 1.4], angleOffsets: [-0.008, 0, 0.008], spins: [{ side: 0, vert: 0 }], advanced: true };
+const MID_SEARCH = { maxCandidates: 12, powerScales: [0.85, 1.0, 1.25, 1.6], angleOffsets: [-0.012, -0.006, 0, 0.006, 0.012], spins: [{ side: 0, vert: 0 }], advanced: true, safety: SAFETY_MID };
+const NARROW_SEARCH = { maxCandidates: 8, powerScales: [0.85, 1.1, 1.4], angleOffsets: [-0.008, 0, 0.008], spins: [{ side: 0, vert: 0 }], advanced: true, safety: SAFETY_NARROW };
 export const DIFFICULTIES = {
   easy: { angleErr: 0.03, speedPct: 0.12, search: NARROW_SEARCH },
   medium: { angleErr: 0.015, speedPct: 0.06, search: MID_SEARCH },

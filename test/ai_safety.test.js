@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newGame, takeShot } from '../src/game.js';
-import { chooseShot, opponentSnookered } from '../src/ai.js';
+import { chooseShot, opponentSnookered, difficultyConfig, DIFFICULTIES } from '../src/ai.js';
 import { snooker } from '../src/variants/snooker.js';
 import { pool } from '../src/variants/pool.js';
 import { HX, HY } from '../src/table.js';
@@ -88,6 +88,39 @@ test('deadly AI still pots a sitter (safety search does not hijack an available 
   const { outcome } = takeShot(g, { angle: shot.angle, speed: shot.speed, spin: shot.spin });
   assert.ok(!outcome.foul, `pot attempt fouled: ${outcome.message}`);
   assert.equal(g.frame.scores[0], 1, `expected the red potted; got ${outcome.message}`);
+});
+
+// Defensive play is available at EVERY difficulty, scaled: each tier's search config carries its own
+// safety-search breadth (narrow → full), and every tier legally plays a safety in a no-pot position.
+test('safety search is wired at every difficulty tier and scales in breadth', () => {
+  const sizeOf = (b) => b.targets * b.thickness.length * b.paces.length * b.spins.length;
+  const easy = DIFFICULTIES.easy.search.safety;
+  const medium = DIFFICULTIES.medium.search.safety;
+  const hard = DIFFICULTIES.hard.search.safety;
+  for (const tier of ['easy', 'medium', 'hard', 'deadly']) {
+    assert.ok(DIFFICULTIES[tier].search.safety, `${tier} must carry a safety-search breadth`);
+  }
+  assert.equal(DIFFICULTIES.deadly.search.safety, hard, 'hard and deadly share the full safety breadth');
+  assert.ok(sizeOf(easy) < sizeOf(medium), 'easy safety search is coarser than medium');
+  assert.ok(sizeOf(medium) < sizeOf(hard), 'medium safety search is coarser than hard');
+  // easy/medium are plain-ball (like their pot search); only the full tier sweeps spin
+  assert.equal(easy.spins.length, 1, 'easy safety is plain-ball');
+  assert.equal(medium.spins.length, 1, 'medium safety is plain-ball');
+  assert.ok(hard.spins.length > 1, 'full safety search sweeps spin');
+});
+
+test('every difficulty legally plays a safety from a no-pot position (no crash, no foul-by-default)', () => {
+  for (const tier of ['easy', 'medium', 'hard', 'deadly']) {
+    const g = snkState([
+      { id: 'cue', color: 'cue', kind: 'cue', pos: { x: -0.6, y: 0.15 } },
+      { id: 'r0', color: 'red', kind: 'red', pos: { x: 0.15, y: 0.03 } },
+    ]);
+    let seed = 7; const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const { config } = difficultyConfig(tier, rng);
+    let shot;
+    assert.doesNotThrow(() => { shot = chooseShot(g, config); }, `${tier} must not throw`);
+    assert.ok(shot && Number.isFinite(shot.angle) && shot.speed > 0, `${tier} must return a usable shot`);
+  }
 });
 
 // The safety/snooker search is snooker-only. A non-snooker variant (pool) under the same advanced

@@ -1367,6 +1367,12 @@ function endShotCam() {
 // as the cueing camera (beginShotCam) so striking the shot is a seamless hand-off. Eased, and orbit is
 // suspended while it's active (toggle off to free-orbit). Not for AI turns / replays / exhibition.
 const aimCam = { pos: new THREE.Vector3(), tgt: new THREE.Vector3(), init: false };
+// Over-the-shoulder framing is a DEFAULT you can override: it re-frames behind the cue whenever you
+// change your aim, but hands the camera to free orbit/pan/zoom the moment you drag it — so you can look
+// around the table at any phase of the shot without toggling the view off. `aimReframe` = "auto-frame
+// is in charge"; a manual orbit (controls 'start') clears it, changing your aim re-arms it.
+let aimReframe = true;
+let lastAimDeg = aimDeg;
 function aimView() {
   return pinCue() && game && !playing && !replaying && !exhibition && !shotCam && !game.frame.frameOver && !isAiTurn();
 }
@@ -1383,8 +1389,12 @@ function driveAimCam(dt) {
   aimCam.pos.lerp(dPos, 1 - Math.exp(-dt / 0.22));
   aimCam.tgt.lerp(dTgt, 1 - Math.exp(-dt / 0.18));
   camera.position.copy(aimCam.pos);
-  camera.lookAt(aimCam.tgt);
+  controls.target.copy(aimCam.tgt); // keep the orbit pivot in sync, so releasing to free-orbit is seamless
+  controls.update();
 }
+// Grabbing the camera (orbit/pan/zoom) during setup hands control to you: stop the auto over-the-shoulder
+// framing until you next change your aim (or the phase resets).
+controls.addEventListener('start', () => { if (aimView()) { aimReframe = false; aimCam.init = false; } });
 
 // The human's shot from the sliders (aim/power/spin/elevation). Ball-in-hand uses the default D spot.
 function humanShot() {
@@ -2187,10 +2197,13 @@ function frame(now) {
     else { endReplay(); onReplayEnd(); }
   }
   if (aimView()) {
-    controls.enabled = false; // over-the-shoulder aim view drives the camera directly
-    driveAimCam(dt);
+    controls.enabled = true; // orbit/pan/zoom stays available at every phase of the shot...
+    if (aimDeg !== lastAimDeg) aimReframe = true; // ...but changing your aim swings the view back behind the cue
+    if (aimReframe) driveAimCam(dt); // auto over-the-shoulder framing (until you grab the camera)
+    else controls.update(); // you've taken over — free to rotate/pan/zoom the table
   } else {
-    aimCam.init = false; // ease in again when aiming next resumes
+    aimReframe = true; // re-arm the over-the-shoulder framing for the next time aiming resumes
+    aimCam.init = false;
     if (!replaying && !exhibition && !shotCam) { // don't fight the replay / exhibition / cueing camera
       // "Cue-ball view" while just watching (AI turn etc.): keep the orbit centred on the white.
       if (pinCue() && game) { const c = cueBallPos(); controls.target.lerp(P3(c.x, c.y, R), 0.25); }
@@ -2198,6 +2211,7 @@ function frame(now) {
       controls.update();
     }
   }
+  lastAimDeg = aimDeg;
   updateNets(now); // swing any pocket net that a ball has just dropped into
   renderer.render(scene, camera);
   requestAnimationFrame(frame);

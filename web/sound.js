@@ -125,11 +125,28 @@ function bakeClap() {
 // Crowd applause/cheer. `level` (0..1) scales loudness, length and density: a light ripple for a
 // routine pot up to a full roar for a century / frame win. Prefers the vendored real-crowd samples
 // (varied per shot); falls back to the synthesised version below until/unless they load.
-export function applause(level = 0.5) {
+export function applause(level = 0.5, collisions = null) {
   if (!enabled() || !audioCtx || audioCtx.state !== 'running') return;
   loadSamples(); // in case unlock hasn't kicked it off yet
-  if (_samples && _samples.length) { applauseSamples(level); return; }
+  if (_samples && _samples.length) { applauseSamples(level, collisions); return; }
   applauseSynth(level);
+}
+
+// A sample-and-hold control curve: value holds, then jumps to a fresh random level in [-1,1]. Step
+// boundaries follow `intervals` (seconds between the shot's collisions) tiled to fill `dur`, so the
+// pitch wobble it drives is IN TIME WITH the break; with no intervals it free-runs at ~8 Hz.
+function buildSampleHold(dur, intervals) {
+  const SR = audioCtx.sampleRate;
+  const len = Math.ceil(SR * dur);
+  const buf = audioCtx.createBuffer(1, len, SR);
+  const d = buf.getChannelData(0);
+  const ivs = (intervals && intervals.length) ? intervals : [0.12]; // fallback ≈ 8 Hz
+  let v = Math.random() * 2 - 1, k = 0, nextStep = Math.max(0.03, ivs[0]) * SR;
+  for (let i = 0; i < len; i++) {
+    if (i >= nextStep) { v = Math.random() * 2 - 1; k++; nextStep += Math.max(0.03, ivs[k % ivs.length]) * SR; }
+    d[i] = v;
+  }
+  return buf;
 }
 
 // Real-crowd applause built as a BED of overlapping grains. Rather than play N clips once, we scatter
@@ -140,7 +157,7 @@ export function applause(level = 0.5) {
 // long, gentle release on the whole bus and a fading, darkening echo tail — the cheer dies away
 // gradually like a real crowd winding down rather than stopping. `level` (0..1) scales the body length,
 // the release length, how many grains overlap and their loudness — a light ripple up to a roar.
-function applauseSamples(level) {
+function applauseSamples(level, collisions = null) {
   try {
     const t0 = audioCtx.currentTime;
     const body = 0.8 + level * 2.0; // the main cheer
@@ -176,6 +193,10 @@ function applauseSamples(level) {
     const hp = audioCtx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 260; hp.Q.value = 0.5;
     const hp2 = audioCtx.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 260; hp2.Q.value = 0.5; // 2nd order → steeper (~24 dB/oct)
     out.connect(hp).connect(hp2).connect(master || audioCtx.destination);
+    // A shared SAMPLE-AND-HOLD control curve (stepped random, [-1,1]) that wobbles each grain's pitch a
+    // touch. Its steps land IN TIME WITH THE COLLISIONS of the shot just played (their inter-onset gaps,
+    // tiled) — so the crowd's cheer echoes the rhythm of the break — or a free ~8 Hz clock if none given.
+    const shBuf = buildSampleHold(3.0, collisions);
     const norm = 1 / Math.sqrt(grains); // keep the summed level in check as grains pile up
     for (let i = 0; i < grains; i++) {
       const si = (Math.random() * _samples.length) | 0;
@@ -196,7 +217,13 @@ function applauseSamples(level) {
       const dyn = 0.5 + Math.random() * (0.5 + 0.7 * (1 - frac)); // wider punch/variation early
       const peak = Math.max(0.0004, norm * dyn * emph * (0.7 + level * 0.6) * _sampleGains[si]);
       const src = audioCtx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
-      const consumed = (life + 0.1) * rate; // buffer-seconds this grain uses at its rate
+      // sample-and-hold pitch wobble: read the shared S&H curve at this grain's own offset/rate (so grains
+      // drift independently) and add a slight ±2–4 % to the playback rate — a subtle "living" detune.
+      const lfo = audioCtx.createBufferSource(); lfo.buffer = shBuf; lfo.loop = true;
+      lfo.playbackRate.value = 0.7 + Math.random() * 0.8;
+      const lfoDepth = audioCtx.createGain(); lfoDepth.gain.value = 0.02 + Math.random() * 0.02;
+      lfo.connect(lfoDepth).connect(src.playbackRate);
+      const consumed = (life + 0.15) * rate; // buffer-seconds this grain uses at its rate (+ LFO headroom)
       const off = Math.random() * Math.max(0, buf.duration - consumed); // vary the slice each time
       const g = audioCtx.createGain();
       g.gain.setValueAtTime(0.0001, st);
@@ -204,6 +231,7 @@ function applauseSamples(level) {
       g.gain.setValueAtTime(peak, st + life - fout); // hold…
       g.gain.exponentialRampToValueAtTime(0.0001, st + life); // …then fade out
       src.connect(g); g.connect(dry); g.connect(delay); g.connect(conv); // dry + echo + a little room
+      lfo.start(st, Math.random() * Math.max(0.01, shBuf.duration - 0.5)); lfo.stop(st + life + 0.05);
       src.start(st, off); src.stop(st + life + 0.05);
     }
   } catch { /* ignore a dropped cheer */ }

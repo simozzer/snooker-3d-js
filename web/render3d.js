@@ -639,6 +639,17 @@ function refereeLine(shooter, scoresBefore, outcome, freshBanner) {
 // geometry the AI's pot proxy uses — cut angle (cos²) × shot-length decay from the pre-shot layout —
 // then adds bonuses for a potted ball that banked off cushions (a double) and for potting more than one
 // ball (a plant). Drives applause length + intensity so the crowd reacts to skill, not just points.
+// The gaps (seconds) between the ball collisions in a shot — the "rhythm" of the break. Fed to
+// applause() so the crowd's sample-and-hold pitch wobble steps in time with the collisions.
+function collisionIntervals(tl) {
+  if (!tl || !tl.length) return null;
+  const ts = [];
+  for (const ev of tl) if (ev.kind === 'pair' || ev.kind === 'rail' || ev.kind === 'jaw') ts.push(ev.t);
+  const iv = [];
+  for (let i = 1; i < ts.length; i++) { const d = ts[i] - ts[i - 1]; if (d > 0.01) iv.push(d); }
+  return iv.length ? iv : null;
+}
+
 const DIFF_EFOLD = 1.5; // metres — shot-length e-folding
 function estimateShotDifficulty(tl, potIds) {
   if (!tl || !tl.length || !potIds || !potIds.length) return 0;
@@ -1171,7 +1182,7 @@ function onReplayEnd() {
   syncBallMeshes(game.pieces); // authoritative resting positions from the rules reconciliation
   updateScore();
   flushBanner(); // century / frame-won banner, held until the shot has settled
-  if (crowdReaction > 0) { applause(crowdReaction); crowdReaction = 0; } // the crowd reacts to the shot
+  if (crowdReaction > 0) { applause(crowdReaction, collisionIntervals(timeline)); crowdReaction = 0; } // crowd reacts, its pitch-wobble in time with the break
   if (refSay) { announce(refSay); refSay = ''; } // the referee calls the shot (foul / break / result)
   if (sharedReplay) { // watching a shared frame back → chain the next recorded shot
     sharedReplay.i += 1;
@@ -1772,7 +1783,7 @@ function onTrickShotEnd() {
   const passed = res && trick.level.goal(res);
   trick.passed = passed;
   const r = el('trick-result');
-  if (passed) { r.textContent = '✓ Shot made!'; r.style.color = '#54c98a'; el('trick-next').disabled = false; status.textContent = 'Nice! Next ▶ for the next level.'; applause(0.85); }
+  if (passed) { r.textContent = '✓ Shot made!'; r.style.color = '#54c98a'; el('trick-next').disabled = false; status.textContent = 'Nice! Next ▶ for the next level.'; applause(0.85, collisionIntervals(timeline)); }
   else { r.textContent = '✗ Not this time — ↺ Retry.'; r.style.color = '#e08a6a'; status.textContent = 'Missed the goal. Retry, or Show me the solution.'; }
 }
 

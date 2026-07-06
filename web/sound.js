@@ -9,6 +9,25 @@ let audioCtx = null;
 let master = null; // compressor → destination, so overlapping knocks stay clean
 let enabled = () => true;
 
+// Vendored CC0/public-domain crowd samples (see web/audio/CREDITS.md). Loaded + decoded once on
+// unlock; each cheer plays randomly picked / detuned / windowed slices layered together so it varies.
+// If they're absent or fail to decode we fall back to the synthesised applause below, so the app
+// still works with no assets. `_samples`: null = not tried yet, [] = tried (none), [buf…] = ready.
+const SAMPLE_URLS = ['./audio/applause-1.wav', './audio/applause-2.oga'];
+let _samples = null, _samplesLoading = false;
+function loadSamples() {
+  if (_samples !== null || _samplesLoading || !audioCtx) return;
+  _samplesLoading = true;
+  const ctx = audioCtx;
+  Promise.all(SAMPLE_URLS.map((u) =>
+    fetch(u)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('missing'))))
+      .then((a) => ctx.decodeAudioData(a))
+      .catch(() => null),
+  )).then((bufs) => { _samples = bufs.filter(Boolean); _samplesLoading = false; })
+    .catch(() => { _samples = []; _samplesLoading = false; });
+}
+
 // Wire up: remember the enable check and resume audio on the first user gesture (browsers require one).
 export function initSound(isEnabled) {
   enabled = isEnabled;
@@ -34,7 +53,8 @@ export function unlockAudio() {
       master = comp;
     }
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    bakeClap(); // pre-render the clap timbre so applause is ready
+    bakeClap(); // pre-render the clap timbre so the synth fallback is ready
+    loadSamples(); // fetch + decode the real crowd samples (async; falls back to synth until ready)
   } catch { /* audio unavailable */ }
 }
 
@@ -86,11 +106,48 @@ function bakeClap() {
   off.startRendering().then((b) => { _clap = b; _baking = false; }).catch(() => { _baking = false; });
 }
 
-// Synthesised crowd applause/cheer — no audio files, so the app stays network-independent. `level`
-// (0..1) scales loudness, length and density: a light ripple for a routine pot up to a full roar for a
-// century / frame win. Sharp clap transients scattered in time, sent through a hall reverb (wet+dry),
-// with a low crowd roar under the big cheers.
+// Crowd applause/cheer. `level` (0..1) scales loudness, length and density: a light ripple for a
+// routine pot up to a full roar for a century / frame win. Prefers the vendored real-crowd samples
+// (varied per shot); falls back to the synthesised version below until/unless they load.
 export function applause(level = 0.5) {
+  if (!enabled() || !audioCtx || audioCtx.state !== 'running') return;
+  loadSamples(); // in case unlock hasn't kicked it off yet
+  if (_samples && _samples.length) { applauseSamples(level); return; }
+  applauseSynth(level);
+}
+
+// Real-crowd applause from the vendored samples. Layers a few voices, each a randomly picked clip
+// played from a random offset, subtly detuned, and gated to a shot-scaled length — so a real crowd
+// recording becomes a bigger, always-varying crowd instead of the same clip every time.
+function applauseSamples(level) {
+  try {
+    const t0 = audioCtx.currentTime;
+    const dur = 1.1 + level * 2.6;
+    const swell = audioCtx.createGain(); // gate: a routine pot gets a short burst, not the whole clip
+    swell.gain.setValueAtTime(0.0001, t0);
+    swell.gain.exponentialRampToValueAtTime(0.6 + level * 0.7, t0 + 0.12); // swell in
+    swell.gain.setValueAtTime(0.6 + level * 0.7, t0 + Math.max(0.2, dur - 0.6));
+    swell.gain.exponentialRampToValueAtTime(0.0001, t0 + dur); // and fade
+    swell.connect(master || audioCtx.destination);
+    const voices = level > 0.6 ? 3 : level > 0.3 ? 2 : 1; // more hands for a bigger moment
+    for (let v = 0; v < voices; v++) {
+      const buf = _samples[(Math.random() * _samples.length) | 0];
+      const src = audioCtx.createBufferSource(); src.buffer = buf;
+      src.playbackRate.value = 0.93 + Math.random() * 0.14; // subtle detune → a fuller, non-identical crowd
+      const window = dur / src.playbackRate.value;
+      const off = Math.random() * Math.max(0, buf.duration - window - 0.05); // vary the slice each time
+      const g = audioCtx.createGain(); g.gain.value = (0.7 + Math.random() * 0.5) / Math.sqrt(voices);
+      src.connect(g).connect(swell);
+      const st = t0 + Math.random() * 0.06 * v; // stagger the voices a touch
+      src.start(st, off, window);
+    }
+  } catch { /* ignore a dropped cheer */ }
+}
+
+// Synthesised crowd applause/cheer — the network-independent fallback when no samples are present.
+// Sharp clap transients scattered in time, sent through a hall reverb (wet+dry), with a low crowd
+// roar under the big cheers.
+function applauseSynth(level = 0.5) {
   if (!enabled() || !audioCtx || audioCtx.state !== 'running') return;
   try {
     const t0 = audioCtx.currentTime;

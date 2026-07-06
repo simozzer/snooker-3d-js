@@ -157,7 +157,10 @@ function applauseSamples(level) {
     const conv = audioCtx.createConvolver(); conv.buffer = reverbIR(); // the room tail (echo/decay)
     const wet = audioCtx.createGain(); wet.gain.value = 0.5 + level * 0.25;
     dry.connect(out); conv.connect(wet); wet.connect(out);
-    out.connect(master || audioCtx.destination);
+    // roll off the low end — recorded crowds carry a lot of room rumble/boom that muddies the mix
+    const hp = audioCtx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 260; hp.Q.value = 0.5;
+    const hp2 = audioCtx.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 260; hp2.Q.value = 0.5; // 2nd order → steeper (~24 dB/oct)
+    out.connect(hp).connect(hp2).connect(master || audioCtx.destination);
     const norm = 1 / Math.sqrt(grains); // keep the summed level in check as grains pile up
     for (let i = 0; i < grains; i++) {
       const si = (Math.random() * _samples.length) | 0;

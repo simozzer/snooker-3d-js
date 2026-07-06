@@ -598,11 +598,51 @@ function updateBroadcast(shooter, scoresBefore, outcome) {
   if (game.frame.frameOver && typeof game.frame.winner === 'number') {
     bcast.pending = { text: `${playerLabel(game.frame.winner).toUpperCase()} WINS THE FRAME`, tier: 'gold' };
   }
-  // crowd reaction, played when the shot settles: a full cheer for a milestone/frame-win banner, else
-  // polite→strong applause scaled by the points/pots just made; nothing for a miss or foul.
-  crowdReaction = bcast.pending ? 1 : gain > 0 ? Math.min(0.75, 0.3 + gain * 0.06) : 0;
+  // crowd reaction, played when the shot settles: a FULL, long cheer for a milestone / frame win, else
+  // a cheer whose length + intensity track how HARD the pot was (thin/long/banked/plant → bigger),
+  // with a small nudge for a high-value pot; nothing for a miss or foul.
+  const diff = gain > 0 ? estimateShotDifficulty(timeline, lastPots) : 0;
+  crowdReaction = bcast.pending ? 1
+    : gain > 0 ? Math.max(0.18, Math.min(0.92, 0.15 + 0.78 * diff + 0.015 * (gain - 1)))
+    : 0;
 }
 let crowdReaction = 0; // 0..1 pending crowd applause level (set by updateBroadcast, played on settle)
+
+// Estimate how hard the pot(s) just made were, as [0,1] (0 = tap-in, 1 = outrageous). Reuses the same
+// geometry the AI's pot proxy uses — cut angle (cos²) × shot-length decay from the pre-shot layout —
+// then adds bonuses for a potted ball that banked off cushions (a double) and for potting more than one
+// ball (a plant). Drives applause length + intensity so the crowd reacts to skill, not just points.
+const DIFF_EFOLD = 1.5; // metres — shot-length e-folding
+function estimateShotDifficulty(tl, potIds) {
+  if (!tl || !tl.length || !potIds || !potIds.length) return 0;
+  try {
+    const start = replayState(tl, planCache, 0);
+    const cue = start.get('cue');
+    if (!cue) return 0.4;
+    let hardest = 0;
+    for (const id of potIds) {
+      const obj = start.get(id);
+      if (!obj) continue;
+      let drop = null; // where this ball dropped → snap to the nearest pocket centre
+      for (const ev of tl) { if (ev.kind === 'pocket' && ev.hit && ev.hit.id === id) { const b = ev.balls.find((x) => x.id === id); if (b) drop = b.pos; break; } }
+      if (!drop) continue;
+      let pk = drop, bd = Infinity;
+      for (const n of pocketNets) { const d = Math.hypot(n.cx - drop.x, n.cy - drop.y); if (d < bd) { bd = d; pk = { x: n.cx, y: n.cy }; } }
+      const cox = obj.pos.x - cue.pos.x, coy = obj.pos.y - cue.pos.y; // cue → object
+      const opx = pk.x - obj.pos.x, opy = pk.y - obj.pos.y; // object → pocket
+      const lc = Math.hypot(cox, coy), lo = Math.hypot(opx, opy);
+      if (lc < 1e-6 || lo < 1e-6) continue;
+      const cosCut = Math.max(0, (cox * opx + coy * opy) / (lc * lo));
+      const ease = cosCut * cosCut * Math.exp(-(lc + lo) / DIFF_EFOLD); // higher = easier
+      if (1 - ease > hardest) hardest = 1 - ease;
+    }
+    let cushions = 0; // a potted ball that hit a rail/jaw on the way = a bank / double
+    for (const ev of tl) if ((ev.kind === 'rail' || ev.kind === 'jaw') && ev.hit && potIds.includes(ev.hit.id)) cushions++;
+    const bank = Math.min(0.35, cushions * 0.18);
+    const plant = Math.min(0.2, (potIds.length - 1) * 0.12); // more than one ball down
+    return Math.max(0, Math.min(1, hardest + bank + plant));
+  } catch { return 0.4; }
+}
 
 // Commentary for the status line: relabel players for AI-vs-AI and append the running break.
 function commentary(outcome) {

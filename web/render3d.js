@@ -130,6 +130,7 @@ scene.add(crowd.group);
 // Ball appearance (variant-driven mesh construction) lives in balls3d.js; the renderer owns the
 // registry (ballMeshes) and the per-frame positioning/spin below.
 let ballMeshes = new Map(); // id → { grp, spinner }
+const gazePrev = new Map(); // id → last scene pos, so the crowd can gaze at where the ACTION is moving
 
 // The cue stick — shown only while a live shot is being cued (behind the cue ball, striking down the
 // aim line). Local +Y runs butt→tip so we can aim it by rotating +Y onto the shot direction.
@@ -1757,8 +1758,22 @@ function frame(now) {
   }
   lastAimDeg = aimDeg;
   updateNets(pocketNets, now); // swing any pocket net that a ball has just dropped into
-  const cueM = ballMeshes.get('cue'); // the crowd's gaze tracks the cue ball (table centre if it's gone)
-  if (cueM) crowd.update(cueM.grp.position.x, cueM.grp.position.y, cueM.grp.position.z);
+  // The crowd watches the SHOT: gaze at the speed-weighted centre of the moving balls (so it tracks the
+  // cue's travel, then shifts to the object ball as it rolls to the pocket). Idle → the cue ball.
+  {
+    let gx = 0, gy = 0, gz = 0, gw = 0;
+    for (const [id, m] of ballMeshes) {
+      const p = m.grp.position;
+      const prev = gazePrev.get(id);
+      const sp = prev ? Math.hypot(p.x - prev.x, p.y - prev.y, p.z - prev.z) : 0;
+      if (prev) { prev.x = p.x; prev.y = p.y; prev.z = p.z; } else gazePrev.set(id, { x: p.x, y: p.y, z: p.z });
+      if (m.grp.visible && sp > 0.012) { gx += p.x * sp; gy += p.y * sp; gz += p.z * sp; gw += sp; }
+    }
+    let tx, ty, tz;
+    if (gw > 1e-4) { tx = gx / gw; ty = gy / gw; tz = gz / gw; } // centre of the action
+    else { const c = ballMeshes.get('cue'); if (c) ({ x: tx, y: ty, z: tz } = c.grp.position); }
+    if (tx !== undefined) crowd.update(tx, ty, tz, now);
+  }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }

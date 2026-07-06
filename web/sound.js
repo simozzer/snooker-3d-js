@@ -13,7 +13,10 @@ let enabled = () => true;
 // unlock; each cheer plays randomly picked / detuned / windowed slices layered together so it varies.
 // If they're absent or fail to decode we fall back to the synthesised applause below, so the app
 // still works with no assets. `_samples`: null = not tried yet, [] = tried (none), [buf…] = ready.
-const SAMPLE_URLS = ['./audio/applause-1.wav', './audio/applause-2.oga', './audio/applause-3.ogg', './audio/applause-4.ogg'];
+const SAMPLE_URLS = [
+  './audio/applause-1.wav', './audio/applause-2.oga', './audio/applause-3.ogg', './audio/applause-4.ogg',
+  './audio/applause-5.ogg', './audio/applause-6.ogg', './audio/applause-7.mp3',
+];
 let _samples = null, _sampleGains = null, _samplesLoading = false;
 // The clips were recorded at very different levels; measure each one's peak so grains from a quiet clip
 // and a loud clip contribute equally (else the bed sounds lumpy). Subsampled — plenty accurate for a peak.

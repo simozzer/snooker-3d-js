@@ -163,7 +163,7 @@ function applauseSamples(level) {
     const fbLP = audioCtx.createBiquadFilter(); fbLP.type = 'lowpass'; fbLP.Q.value = 0.3;
     fbLP.frequency.setValueAtTime(3000, t0); // echoes start fairly open…
     fbLP.frequency.exponentialRampToValueAtTime(480, t0 + span); // …then sweep down to muffled as they fade
-    const fb = audioCtx.createGain(); fb.gain.value = 0.52 + level * 0.12; // <1 so repeats decay
+    const fb = audioCtx.createGain(); fb.gain.value = 0.3 + level * 0.1; // low feedback → a short, subtle echo
     const echo = audioCtx.createGain(); echo.gain.value = 0.5 + level * 0.22;
     delay.connect(fbLP).connect(fb).connect(delay); // feedback loop
     delay.connect(echo).connect(out);
@@ -181,14 +181,18 @@ function applauseSamples(level) {
       const si = (Math.random() * _samples.length) | 0;
       const buf = _samples[si];
       const rate = 0.9 + Math.random() * 0.2; // detune → a fuller, non-identical crowd
-      const frac = Math.pow(Math.random(), 1.7); // front-loaded: dense early, sparse late → natural thinning
-      const st = t0 + frac * span * 0.9; // …last grains land well into the release
+      // Strongly front-loaded: dense at the start (a roar of overlapping claps), then quickly thinning to
+      // just a few sparse, scattered claps that get FEWER and quieter as the cheer dies — a crowd petering
+      // out to the odd isolated clap.
+      const frac = Math.pow(Math.random(), 3.0);
+      // extra timing jitter that grows with frac, so late claps land at irregular intervals (not a patter)
+      const st = t0 + Math.min(span, frac * span * 0.9 + (Math.random() - 0.5) * frac * 0.9);
       const fin = 0.04 + Math.random() * 0.08 + frac * 0.16; // early grains snap in (punchy); later ones soften
       const fout = 0.3 + Math.random() * 0.35 + frac * 0.8; // later grains fade slower → a smoother tail
       const life = Math.max(fin + fout + 0.12, Math.min(0.5 + Math.random() * 1.0, t0 + span + 0.3 - st));
       // loudest + most dynamic at the start: emphasise early grains and give them a wider level spread,
       // then ease down over the cheer so it settles into a steadier clap
-      const emph = 0.3 + 0.7 * Math.pow(1 - frac, 1.25); // frac 0 → ~1.0, frac 1 → 0.3
+      const emph = 0.15 + 0.85 * Math.pow(1 - frac, 1.6); // loud up front (~1.0), fading to a faint ~0.15 late
       const dyn = 0.5 + Math.random() * (0.5 + 0.7 * (1 - frac)); // wider punch/variation early
       const peak = Math.max(0.0004, norm * dyn * emph * (0.7 + level * 0.6) * _sampleGains[si]);
       const src = audioCtx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;

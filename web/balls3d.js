@@ -60,12 +60,14 @@ export function makeBallMesh(piece, variant, R, S) {
   // the cue piece an id but no group/number, so variant.label() would return "undefined"/"0" and stamp
   // that on the cue ball; guard on isCue and drop any stray "undefined".)
   const label = isCue ? '' : (variant.label ? variant.label(piece) : '');
+  let spot = null;
   if (label && label !== 'undefined') {
     grp.add(numberSprite(label, R, S)); // numbered ball: a camera-facing decal (doesn't spin with the ball)
   } else {
-    const spot = new THREE.Mesh(new THREE.SphereGeometry(R * S * 0.28, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+    spot = new THREE.Mesh(new THREE.SphereGeometry(R * S * 0.28, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffffff }));
     spot.position.set(0, R * S * 0.92, 0);
+    spot.visible = false; // only shown while the ball is actually spinning (see the renderer's applyState)
     spinner.add(spot); // spin spot rolls with the ball
   }
-  return { grp, spinner };
+  return { grp, spinner, spot };
 }

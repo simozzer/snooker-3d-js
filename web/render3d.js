@@ -155,8 +155,10 @@ function syncBallMeshes(pieces) {
       scene.add(m.grp);
       ballMeshes.set(p.id, m);
     }
-    ballMeshes.get(p.id).grp.position.copy(P3(p.pos.x, p.pos.y, R));
-    ballMeshes.get(p.id).grp.visible = true;
+    const m = ballMeshes.get(p.id);
+    m.grp.position.copy(P3(p.pos.x, p.pos.y, R));
+    m.grp.visible = true;
+    if (m.spot) m.spot.visible = false; // these are authoritative RESTING positions — no spin to show
   }
 }
 
@@ -176,6 +178,8 @@ let endT = 0;
 
 // accumulate a rolling orientation per ball from spin so the surface spot visibly turns
 const orient = new Map();
+const SPIN_SHOW = 0.35; // rad/s — below this the ball is effectively at rest, so hide its spin spot
+window.__spinSpots = () => { let n = 0; for (const [, m] of ballMeshes) if (m.spot && m.spot.visible) n++; return n; }; // headless test hook
 const BAG_SLOTS = [[0, 0], [1.05, 0.2], [0.5, 1.0]]; // up to 3 resting spots (in ball-radius units) in a bag
 function applyState(state, dt) {
   // lay potted balls to rest clustered in their nearest pocket's bag, so a full net shows up to 3 balls
@@ -199,6 +203,7 @@ function applyState(state, dt) {
   for (const [id, s] of state) {
     const m = ballMeshes.get(id);
     if (!m) continue;
+    if (m.spot) m.spot.visible = false; // hidden by default; shown below only while the ball is spinning
     if (s.pocketed) {
       if (s.cleared) { m.grp.visible = true; m.grp.position.copy(P3(s.pos.x, s.pos.y, s.pos.z)); continue; } // frozen where it left
       const b = bagPos.get(id) ?? { x: s.pos.x, y: s.pos.y, z: -0.05 };
@@ -208,6 +213,8 @@ function applyState(state, dt) {
     }
     m.grp.visible = true;
     m.grp.position.copy(P3(s.pos.x, s.pos.y, s.pos.z));
+    // the white spin spot is only meaningful while the ball moves — show it when spinning, hide at rest
+    if (m.spot) m.spot.visible = Math.hypot(s.spin.x, s.spin.y, s.spin.z) > SPIN_SHOW;
     // integrate the spin (rad/s) into a visible rotation of the ball's spinner (the number stays put)
     if (dt > 0) {
       const q = orient.get(id) ?? new THREE.Quaternion();

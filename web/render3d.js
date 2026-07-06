@@ -24,6 +24,7 @@ import { getLevel, runTrickShot, findSolution, CURATED_COUNT } from '../src/tric
 import { buildPlanCache, replayState } from './replay.js';
 import { makeStudioEnv } from './materials.js';
 import { initSound, unlockAudio, knock, applause } from './sound.js';
+import { initReferee, announce } from './referee.js';
 import { makeBallMesh } from './balls3d.js';
 import { buildTable, kickNet, updateNets, NET_DEPTH } from './table3d.js';
 import { createPreview } from './preview3d.js';
@@ -579,6 +580,7 @@ function resetBreaks({ keepHigh = false } = {}) {
 // Fold a resolved shot into the running break. `shooter` = who played; `scoresBefore` = their score
 // snapshot before takeShot (null for pot-counting variants); `outcome` = variant.applyOutcome result.
 function updateBroadcast(shooter, scoresBefore, outcome) {
+  const pendingBefore = bcast.pending; // did THIS shot raise a fresh banner? (drives the spoken milestone)
   if (bcast.owner !== shooter) { bcast.brk = 0; bcast.owner = shooter; bcast.milestone = 0; } // fresh visit
   const gain = scoresBefore ? game.frame.scores[shooter] - scoresBefore[shooter] : lastPots.length;
   if (gain > 0) {
@@ -605,8 +607,33 @@ function updateBroadcast(shooter, scoresBefore, outcome) {
   crowdReaction = bcast.pending ? 1
     : gain > 0 ? Math.max(0.18, Math.min(0.92, 0.15 + 0.78 * diff + 0.015 * (gain - 1)))
     : 0;
+  refSay = refereeLine(shooter, scoresBefore, outcome, bcast.pending !== pendingBefore); // spoken on settle
 }
 let crowdReaction = 0; // 0..1 pending crowd applause level (set by updateBroadcast, played on settle)
+
+// Build the referee's spoken line for a shot (snooker-family only): fouls (+ points), miss, free ball,
+// the re-spotted black, break milestones, and the frame result. Spoken when the shot settles.
+let refSay = '';
+let refRespotSpoken = false; // the re-spotted-black call fires once per frame
+function refereeLine(shooter, scoresBefore, outcome, freshBanner) {
+  if (!game.frame || !('onColour' in game.frame)) return ''; // snooker & double-snooker only
+  const parts = [];
+  if (outcome && outcome.foul) {
+    const opp = 1 - shooter;
+    const pen = scoresBefore ? Math.max(0, game.frame.scores[opp] - scoresBefore[opp]) : 4;
+    parts.push(pen ? `Foul, ${pen} away.` : 'Foul.');
+    if (outcome.miss) parts.push('Miss.');
+  }
+  if (outcome && outcome.freeBall) parts.push('Free ball.');
+  if (game.frame.respottedBlack && !refRespotSpoken) { parts.push('Re-spotted black.'); refRespotSpoken = true; }
+  if (game.frame.frameOver && typeof game.frame.winner === 'number') {
+    const [a, b] = game.frame.scores;
+    parts.push(`${playerLabel(game.frame.winner)} wins the frame, ${Math.max(a, b)} to ${Math.min(a, b)}.`);
+  } else if (freshBanner && bcast.milestone) {
+    parts.push(bcast.milestone === 147 ? 'Maximum break! One four seven.' : bcast.milestone === 100 ? 'Century.' : 'Fifty.');
+  }
+  return parts.filter(Boolean).join(' ');
+}
 
 // Estimate how hard the pot(s) just made were, as [0,1] (0 = tap-in, 1 = outrageous). Reuses the same
 // geometry the AI's pot proxy uses — cut angle (cos²) × shot-length decay from the pre-shot layout —
@@ -705,6 +732,7 @@ function newFrameGame() {
   pauseThen = null;
   aiLineup = null;
   recallCount = 0; lastOutcome = null; awaitingMiss = false; el('missprompt').classList.remove('show'); // clear any miss state
+  refRespotSpoken = false; refSay = ''; // reset the referee's per-frame call state
   clearShareContext(); // a fresh frame drops any shared/challenge context
   frameSeed = seedCounter++; // record the rack seed so this frame is shareable/reproducible
   frameShots = [];
@@ -1144,6 +1172,7 @@ function onReplayEnd() {
   updateScore();
   flushBanner(); // century / frame-won banner, held until the shot has settled
   if (crowdReaction > 0) { applause(crowdReaction); crowdReaction = 0; } // the crowd reacts to the shot
+  if (refSay) { announce(refSay); refSay = ''; } // the referee calls the shot (foul / break / result)
   if (sharedReplay) { // watching a shared frame back → chain the next recorded shot
     sharedReplay.i += 1;
     if (!game.frame.frameOver && sharedReplay.i < sharedReplay.shots.length) {
@@ -1454,6 +1483,7 @@ window.addEventListener('keyup', (ev) => {
 // The loop owns soundIdx (which timeline events have already sounded); the synth owns the audio graph.
 let soundIdx = 0; // last timeline event whose sound has played, during replay
 initSound(() => el('sound').checked); // knock()/applause() honour the Sound toggle
+initReferee(() => el('referee').checked); // spoken referee (local TTS) honours the Referee toggle
 // Browser autoplay policy blocks audio until a user gesture, and resuming an AudioContext in the same
 // gesture that created it is unreliable — so Sound starts OFF and toggling it (an explicit click) is the
 // gesture that unlocks audio. The label pulses until the user enables it, then reflects on/off state.

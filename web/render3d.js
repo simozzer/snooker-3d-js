@@ -1363,8 +1363,16 @@ window.addEventListener('keyup', (ev) => {
 // --- sound: synthesised collision knocks live in sound.js (leaf WebAudio module) -----------------
 // The loop owns soundIdx (which timeline events have already sounded); the synth owns the audio graph.
 let soundIdx = 0; // last timeline event whose sound has played, during replay
-initSound(() => el('sound').checked); // resume audio on first gesture; knock() honours the Sound toggle
-el('sound').addEventListener('change', unlockAudio);
+initSound(() => el('sound').checked); // knock()/applause() honour the Sound toggle
+// Browser autoplay policy blocks audio until a user gesture, and resuming an AudioContext in the same
+// gesture that created it is unreliable — so Sound starts OFF and toggling it (an explicit click) is the
+// gesture that unlocks audio. The label pulses until the user enables it, then reflects on/off state.
+const soundEl = el('sound'), soundLbl = el('soundlbl'), soundTxt = el('soundtxt');
+soundEl.addEventListener('change', () => {
+  unlockAudio();
+  soundLbl.classList.remove('attention'); // engaged once — stop nagging
+  soundTxt.textContent = soundEl.checked ? '🔊 Sound on' : '🔇 Sound off';
+});
 
 // --- 147 exhibition + video recording --------------------------------------------------------
 // Plays a scripted, validated 147 clearance (src/exhibition.build147) as a continuous montage under a

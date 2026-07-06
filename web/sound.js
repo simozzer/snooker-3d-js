@@ -117,29 +117,37 @@ export function applause(level = 0.5) {
 }
 
 // Real-crowd applause from the vendored samples. Layers a few voices, each a randomly picked clip
-// played from a random offset, subtly detuned, and gated to a shot-scaled length — so a real crowd
-// recording becomes a bigger, always-varying crowd instead of the same clip every time.
+// played from a random offset, subtly detuned — so a real recording becomes a bigger, always-varying
+// crowd instead of the same clip every time. Each voice fades in (no click when starting mid-clip),
+// sustains, then eases out over a ~0.5 s release; a parallel hall reverb keeps ringing for ~1.5 s after
+// the dry claps fade, so the cheer decays into the room rather than chopping off at the clip's end.
 function applauseSamples(level) {
   try {
     const t0 = audioCtx.currentTime;
     const dur = 1.1 + level * 2.6;
-    const swell = audioCtx.createGain(); // gate: a routine pot gets a short burst, not the whole clip
-    swell.gain.setValueAtTime(0.0001, t0);
-    swell.gain.exponentialRampToValueAtTime(0.6 + level * 0.7, t0 + 0.12); // swell in
-    swell.gain.setValueAtTime(0.6 + level * 0.7, t0 + Math.max(0.2, dur - 0.6));
-    swell.gain.exponentialRampToValueAtTime(0.0001, t0 + dur); // and fade
-    swell.connect(master || audioCtx.destination);
+    const REL = 0.5; // release fade length — the cure for the abrupt cut-off
+    const out = audioCtx.createGain(); out.gain.value = 0.85 + level * 0.5;
+    const dry = audioCtx.createGain(); dry.gain.value = 0.8;
+    const conv = audioCtx.createConvolver(); conv.buffer = reverbIR(); // the room tail (echo/decay)
+    const wet = audioCtx.createGain(); wet.gain.value = 0.5 + level * 0.2;
+    dry.connect(out); conv.connect(wet); wet.connect(out);
+    out.connect(master || audioCtx.destination);
     const voices = level > 0.6 ? 3 : level > 0.3 ? 2 : 1; // more hands for a bigger moment
     for (let v = 0; v < voices; v++) {
       const buf = _samples[(Math.random() * _samples.length) | 0];
-      const src = audioCtx.createBufferSource(); src.buffer = buf;
-      src.playbackRate.value = 0.93 + Math.random() * 0.14; // subtle detune → a fuller, non-identical crowd
-      const window = dur / src.playbackRate.value;
-      const off = Math.random() * Math.max(0, buf.duration - window - 0.05); // vary the slice each time
-      const g = audioCtx.createGain(); g.gain.value = (0.7 + Math.random() * 0.5) / Math.sqrt(voices);
-      src.connect(g).connect(swell);
+      const rate = 0.93 + Math.random() * 0.14; // subtle detune → a fuller, non-identical crowd
+      const src = audioCtx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
+      const consumed = (dur + 0.15) * rate; // buffer-seconds this voice will use at its rate
+      const off = Math.random() * Math.max(0, buf.duration - consumed); // vary the slice each time
+      const g = audioCtx.createGain();
+      const peak = (0.7 + Math.random() * 0.5) / Math.sqrt(voices);
       const st = t0 + Math.random() * 0.06 * v; // stagger the voices a touch
-      src.start(st, off, window);
+      g.gain.setValueAtTime(0.0001, st);
+      g.gain.exponentialRampToValueAtTime(peak, st + 0.08); // fade in
+      g.gain.setValueAtTime(peak, t0 + Math.max(0.12, dur - REL)); // sustain…
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur); // …then ease out
+      src.connect(g); g.connect(dry); g.connect(conv); // dry + into the room
+      src.start(st, off); src.stop(t0 + dur + 0.08);
     }
   } catch { /* ignore a dropped cheer */ }
 }

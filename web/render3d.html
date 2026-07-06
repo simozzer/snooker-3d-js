@@ -22,6 +22,9 @@
       button.nudge { padding: 4px 0; font-size: 13px; background: #33404c; min-width: 30px; flex: 0 0 auto; }
       label.chk { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #a8b6c4; cursor: pointer; }
       label.chk input { cursor: pointer; }
+      /* audio can't start until a user gesture, so Sound starts OFF and pulses until the user enables it */
+      label.chk.attention { color: #e7d37a; border-radius: 6px; padding: 3px 6px; margin: 0 -6px; animation: soundpulse 1.7s ease-in-out infinite; }
+      @keyframes soundpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(231, 211, 122, 0); } 50% { box-shadow: 0 0 0 3px rgba(231, 211, 122, 0.4); } }
       .aimrow { display: flex; gap: 6px; align-items: center; }
       .aimrow input[type="range"] { flex: 1; min-width: 0; }
       #status { font-size: 12px; color: #8fa3b5; min-height: 32px; line-height: 1.4; }
@@ -117,7 +120,7 @@
   <body>
     <div id="app">
       <div id="view">
-        <div id="version">v0.18</div>
+        <div id="version">v0.19</div>
         <div id="replayband">
           <div class="lb top"></div>
           <div class="lb bottom"></div>
@@ -190,7 +193,7 @@
         <button id="newframe" class="sec">New frame</button>
         <button id="sharelink" class="sec">🔗 Copy share link</button>
         <button id="takeover" class="sec" style="display:none;">🎯 Take over &amp; reply</button>
-        <label class="chk"><input type="checkbox" id="sound" checked /> Sound</label>
+        <label class="chk attention" id="soundlbl"><input type="checkbox" id="sound" /> <span id="soundtxt">🔇 Sound off — click to enable</span></label>
         <label class="chk"><input type="checkbox" id="replays" checked /> Pot replays (tap the table or press any key to skip)</label>
         <label class="chk"><input type="checkbox" id="pincue" checked /> Cue-ball view (over-the-shoulder while aiming)</label>
         <div id="status"></div>

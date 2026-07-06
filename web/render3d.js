@@ -28,6 +28,7 @@ import { makeBallMesh } from './balls3d.js';
 import { buildTable, kickNet, updateNets, NET_DEPTH } from './table3d.js';
 import { createPreview } from './preview3d.js';
 import { driveReplayCamera } from './replaycam.js';
+import { buildCrowd } from './crowd.js';
 import { encodeFrame, decodeFrame, verifyFrame, variantId as shareVariantId, variantById as shareVariantById } from '../src/share.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
@@ -119,6 +120,9 @@ function rebuildTable() {
   scene.add(tableGroup);
 }
 rebuildTable();
+// A faint Lowry-esque arena + audience ringing the table — pure background atmosphere (built once,
+// sized to the opening table; sits well beyond any camera so it never obscures play).
+scene.add(buildCrowd(HX * S, HY * S));
 
 // --- balls -----------------------------------------------------------------------------------
 // Ball appearance (variant-driven mesh construction) lives in balls3d.js; the renderer owns the

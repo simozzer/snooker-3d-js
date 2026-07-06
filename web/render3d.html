@@ -8,9 +8,9 @@
       :root { color-scheme: dark; }
       * { box-sizing: border-box; }
       body { margin: 0; font-family: system-ui, sans-serif; background: #12161b; color: #e8e8e8; }
-      #app { display: flex; height: 100vh; }
+      #app { display: flex; height: 100vh; height: 100dvh; }
       #view { flex: 1; position: relative; min-width: 0; }
-      #view canvas { display: block; width: 100%; height: 100%; }
+      #view canvas { display: block; width: 100%; height: 100%; touch-action: none; }
       #panel { width: 280px; padding: 16px; background: #1b2229; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
       h1 { font-size: 15px; margin: 0 0 4px; color: #9fb4c7; letter-spacing: 0.5px; }
       .ctl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
@@ -73,6 +73,45 @@
       details#rules h4 { margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: #7f93a5; }
       details#rules ul { margin: 0; padding-left: 16px; }
       details#rules li { font-size: 12px; color: #a8b6c4; line-height: 1.45; margin-bottom: 4px; }
+
+      /* ---- touch devices: finger-sized controls (applies in any orientation) ---- */
+      @media (pointer: coarse) {
+        button { padding: 13px 14px; font-size: 15px; border-radius: 10px; }
+        button.nudge { min-width: 48px; padding: 13px 0; font-size: 17px; }
+        select { min-height: 46px; font-size: 15px; padding: 0 10px; border-radius: 8px;
+          background: #222b34; color: #e8e8e8; border: 1px solid #3a4753; }
+        input[type="range"] { height: 40px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+          width: 26px; height: 26px; border-radius: 50%; background: #4aa; background: #5fb0e0; border: 2px solid #fff; margin-top: -10px; }
+        input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: #3a4753; }
+        input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; border: 2px solid #fff; border-radius: 50%; background: #5fb0e0; }
+        input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: #3a4753; }
+        .ctl { font-size: 13px; }
+        .ctl label { font-size: 13px; }
+        label.chk { font-size: 14px; padding: 6px 0; gap: 10px; }
+        label.chk input { width: 20px; height: 20px; }
+        #status { font-size: 13px; }
+        #spinpad { width: 150px !important; height: 150px !important; }
+      }
+
+      /* ---- narrow screens (portrait phones / small tablets): stack canvas over controls ---- */
+      @media (max-width: 720px) {
+        #app { flex-direction: column; }
+        #view { flex: none; height: 52dvh; width: 100%; }
+        #panel { width: 100%; flex: 1; min-height: 0; padding: 12px 14px 72px; gap: 12px;
+          -webkit-overflow-scrolling: touch; }
+        #panel > .hint { display: none; } /* drop the verbose paragraph hints to save vertical space */
+        h1 { font-size: 14px; }
+        /* keep "Play your shot" always reachable: a fixed bottom action bar (panel padded to clear it) */
+        #play { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; border-radius: 0;
+          padding: 16px; font-size: 16px; box-shadow: 0 -6px 16px rgba(0,0,0,.5); }
+        /* smaller cinematic overlays so they fit a phone width */
+        #replayband .badge { font-size: 22px; letter-spacing: 3px; padding: 9px 18px; gap: 10px; }
+        #replayband .dot { width: 15px; height: 15px; }
+        #replayband .sub { font-size: 12px; letter-spacing: 2px; }
+        #bcastbanner { font-size: 18px; letter-spacing: 2px; padding: 9px 16px; }
+        #version { font-size: 11px; }
+      }
     </style>
   </head>
   <body>

@@ -66,6 +66,18 @@
       #bcastbanner.silver { color: #dfe9f2; border: 2px solid rgba(200,220,240,0.9); box-shadow: 0 0 24px rgba(180,210,240,0.3); }
       @keyframes bcastpop { 0% { transform: translateX(-50%) scale(.6); opacity: 0; } 12% { transform: translateX(-50%) scale(1.05); opacity: 1; }
         20% { transform: translateX(-50%) scale(1); } 82% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) scale(1); } }
+      /* miss-rule prompt: the incoming player chooses to play on or recall the shot */
+      #missprompt { position: absolute; inset: 0; z-index: 6; display: none; align-items: center; justify-content: center;
+        background: rgba(6,9,13,0.55); backdrop-filter: blur(2px); }
+      #missprompt.show { display: flex; }
+      #missprompt .mp-card { background: #141b22; border: 1px solid #33404c; border-radius: 12px; padding: 20px 24px; text-align: center;
+        box-shadow: 0 12px 40px rgba(0,0,0,0.6); max-width: 90%; }
+      #missprompt .mp-title { color: #ffdf6b; font-weight: 900; letter-spacing: 2px; font-size: 20px; }
+      #missprompt .mp-sub { color: #a8b6c4; font-size: 13px; margin: 8px 0 16px; }
+      #missprompt .mp-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+      #missprompt button { padding: 10px 16px; border-radius: 8px; border: 1px solid #3a4a58; background: #1c2530; color: #dfe9f2;
+        font-size: 14px; font-weight: 700; cursor: pointer; }
+      #missprompt button.primary { background: #2156b0; border-color: #2f6ad0; color: #fff; }
       /* collapsible how-to-play / rules */
       details#rules { border: 1px solid #33404c; border-radius: 8px; background: #151b21; }
       details#rules > summary { list-style: none; cursor: pointer; padding: 9px 12px; font-size: 13px; font-weight: 600; color: #cfe0ee; user-select: none; }
@@ -120,7 +132,7 @@
   <body>
     <div id="app">
       <div id="view">
-        <div id="version">v0.27</div>
+        <div id="version">v0.28</div>
         <div id="replayband">
           <div class="lb top"></div>
           <div class="lb bottom"></div>
@@ -128,6 +140,16 @@
           <div class="sub">press any key to skip</div>
         </div>
         <div id="bcastbanner"></div>
+        <div id="missprompt">
+          <div class="mp-card">
+            <div class="mp-title">Foul and a miss</div>
+            <div class="mp-sub" id="mp-sub"></div>
+            <div class="mp-btns">
+              <button id="miss-play">Play the position</button>
+              <button id="miss-again" class="primary">Make them play again</button>
+            </div>
+          </div>
+        </div>
       </div>
       <div id="panel">
         <div>

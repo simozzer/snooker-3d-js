@@ -30,7 +30,9 @@ export const snooker = {
     'Pot a red (1 pt), then a colour (yellow 2 … black 7); the colour is re-spotted. Repeat until the reds are gone.',
     'Then clear the six colours in ascending order — these stay down once potted.',
     'Foul (wrong or no first contact, or potting the cue ball): the opponent scores 4–7.',
-    'When all balls are gone, the higher score wins the frame.',
+    'Free ball: snookered after a foul? Hit any ball — it stands in for the ball-on.',
+    'Miss: a foul when you could have hit the ball-on lets the opponent make you play it again.',
+    'When all balls are gone the higher score wins — or, if level, the black is re-spotted for a decider.',
   ],
   bounds,
   pockets,
@@ -68,18 +70,55 @@ export const snooker = {
 
   // --- AI targeting ---
   aiTargets(state) {
+    if (state.frame.freeBall) return state.pieces.filter((p) => p.id !== 'cue'); // any ball may be nominated
     const on = ballOn(state.frame);
     if (on === 'red') return state.pieces.filter((p) => p.color === 'red');
     if (on === 'any-colour') return state.pieces.filter((p) => p.kind === 'colour');
     return state.pieces.filter((p) => p.color === on);
   },
   aiLegalFirst(frame, piece) {
-    return piece != null && isLegalPot(ballOn(frame), piece.color);
-  },
-  aiLegalPot(frame, piece) {
+    if (piece == null) return false;
+    if (frame.freeBall) return true; // any first contact is a legal nomination on a free ball
     return isLegalPot(ballOn(frame), piece.color);
   },
-  aiValue: (frame, piece) => VALUES[piece.color] * 100,
+  // Is there a DIRECT (unobstructed) line from `cuePos` to at least one ball-on? Used by game.js to
+  // judge the miss rule (a foul when you could have hit the ball-on) and to award a free ball (a foul
+  // that leaves the incoming player snookered — no line to any ball-on). Same 2R-corridor test the AI
+  // uses; returns true if nothing is on (no misses to flag then).
+  canHitBallOn(state, cuePos) {
+    const targets = this.aiTargets(state);
+    if (!targets.length) return true;
+    const clr = 2 * R - 1e-3;
+    const segDist = (ax, ay, bx, by, cx, cy) => {
+      const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      let t = L2 > 0 ? ((cx - ax) * dx + (cy - ay) * dy) / L2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(cx - (ax + t * dx), cy - (ay + t * dy));
+    };
+    for (const T of targets) {
+      let clear = true;
+      for (const b of state.pieces) {
+        if (b.id === 'cue' || b.id === T.id) continue;
+        if (segDist(cuePos.x, cuePos.y, T.pos.x, T.pos.y, b.pos.x, b.pos.y) < clr) { clear = false; break; }
+      }
+      if (clear) return true; // a clean line to this ball-on exists
+    }
+    return false; // snookered on every ball-on
+  },
+  aiLegalPot(frame, piece) {
+    if (frame.freeBall) return true; // the nominated free ball is a legal pot
+    return isLegalPot(ballOn(frame), piece.color);
+  },
+  // A free ball scores the value of the ball ON (e.g. 1 on a red), NOT the nominated ball's own value —
+  // otherwise the AI would wildly over-value nominating the black. Off a free ball it's the ball's value.
+  aiValue(frame, piece) {
+    if (frame.freeBall) {
+      const on = ballOn(frame);
+      const val = on === 'red' ? VALUES.red : on === 'any-colour' ? VALUES.yellow : VALUES[on];
+      return val * 100;
+    }
+    return VALUES[piece.color] * 100;
+  },
   // Weight the AI's positional leave by ball value (the black off every red) — snooker-only;
   // see bestNextPotProb in ai.js. Other variants leave this unset and keep ease-only leaves.
   playForValue: true,
@@ -184,11 +223,17 @@ export const snooker = {
 
   // --- HUD ---
   sideValue: (frame, i) => String(frame.scores[i]),
-  centerText: (frame) => (frame.frameOver ? '' : `on: ${ballOn(frame) ?? '—'}`),
+  centerText: (frame) => {
+    if (frame.frameOver) return '';
+    if (frame.respottedBlack) return 'RE-SPOTTED BLACK — next score wins';
+    return `${frame.freeBall ? 'FREE BALL · ' : ''}on: ${ballOn(frame) ?? '—'}`;
+  },
   // A plain-language "what to do next" for the player whose turn it is.
   turnGoal: (frame) => {
     const on = ballOn(frame);
     if (!on) return '';
+    if (frame.respottedBlack) return 'pot the black to win the frame';
+    if (frame.freeBall) return `free ball — hit any ball to nominate it (scores as ${on === 'red' ? 'a red' : on === 'any-colour' ? 'a colour' : 'the ' + on})`;
     if (on === 'red') return 'pot a red';
     if (on === 'any-colour') return 'pot any colour';
     return `pot the ${on}`;

@@ -18,7 +18,7 @@ import { simulate } from '../src/simulate.js';
 import { snooker } from '../src/variants/snooker.js';
 import { pool } from '../src/variants/pool.js';
 import { nineball } from '../src/variants/nineball.js';
-import { aiTurn, chooseShotFinish, difficultyConfig, executeShot } from '../src/ai.js';
+import { aiTurn, chooseShotFinish, difficultyConfig, executeShot, shouldRecallMiss } from '../src/ai.js';
 import { build147 } from '../src/exhibition.js';
 import { getLevel, runTrickShot, findSolution, CURATED_COUNT } from '../src/trickshots.js';
 import { buildPlanCache, replayState } from './replay.js';
@@ -704,6 +704,7 @@ function newFrameGame() {
   pauseUntil = 0;
   pauseThen = null;
   aiLineup = null;
+  recallCount = 0; lastOutcome = null; awaitingMiss = false; el('missprompt').classList.remove('show'); // clear any miss state
   clearShareContext(); // a fresh frame drops any shared/challenge context
   frameSeed = seedCounter++; // record the rack seed so this frame is shareable/reproducible
   frameShots = [];
@@ -735,6 +736,7 @@ function playShot(shot) {
   planCache = buildPlanCache(timeline, R);
   endT = timeline.length ? timeline[timeline.length - 1].t : 0;
   lastAngle = shot.angle;
+  lastOutcome = res.outcome; lastPreShot = res.preShot; lastShooter = shooter; // for the miss rule (recall)
   lastPots = pottedObjectBalls(timeline); // object balls dropped this shot → worth a replay
   updateBroadcast(shooter, scoresBefore, res.outcome); // fold into the running break (banner flushes on settle)
   status.textContent = commentary(res.outcome);
@@ -757,6 +759,10 @@ let pauseUntil = 0; // frame-clock time to hold before the next transition (pre-
 let pauseThen = null; // 'replay' (start the replay) | 'handoff' (end replay + next turn)
 let lastPots = [];
 let lastAngle = 0;
+let lastOutcome = null, lastPreShot = null, lastShooter = 0; // last shot's rules result + pre-shot snapshot
+let recallCount = 0; // consecutive miss-recalls of the same offender (capped to avoid a livelock)
+let awaitingMiss = false; // the miss prompt is open, waiting on the human's choice
+const MAX_RECALLS = 3;
 const replaysOn = () => el('replays').checked;
 const pinCue = () => el('pincue').checked; // keep the free-orbit camera centred on the cue ball
 
@@ -1040,7 +1046,7 @@ function humanShot() {
   // Without this, activating Play during that window fired a shot into the just-cleared table, fouling,
   // flipping the turn, and re-arming another replay → the reported replay loop + scrambled turns.
   if (replaying || pauseThen === 'replay' || pauseThen === 'handoff') { skipReplay(); return; }
-  if (playing || sharedReplay) return;
+  if (playing || sharedReplay || awaitingMiss) return; // awaiting the miss choice → Play is inert
   if (trick) { cancelTrickAuto(); if (!trick.awaiting) playTrickShot(sliderShot()); return; }
   if (isAiTurn() || game.frame.frameOver) return;
   shotIsAi = false;
@@ -1151,11 +1157,48 @@ function onReplayEnd() {
     if (selfPlay() && !exhibition) setTimeout(() => { if (game.frame.frameOver && selfPlay() && !exhibition) newFrameGame(); }, 3000);
     return;
   }
+  // MISS RULE: a foul where the offender COULD have hit the ball-on but didn't. The incoming player may
+  // recall it (make them play again from the original position). Capped so a deterministic AI can't
+  // livelock, and skipped in AI-vs-AI (nothing to choose, keeps the exhibition flowing).
+  if (lastOutcome && lastOutcome.miss && lastPreShot && recallCount < MAX_RECALLS && !selfPlay()) {
+    if (isAiTurn()) { if (shouldRecallMiss(game)) { recallMiss(); return; } } // AI incoming decides
+    else { offerMissChoice(); return; } // human incoming → pause and offer the choice
+  }
+  recallCount = 0; // a shot that isn't recalled ends the streak
+  finishHandoff();
+}
+
+// The normal end-of-shot hand-off (also reached after the miss choice resolves).
+function finishHandoff() {
   if (game.frame.ballInHand) beginBallInHand(); else endBallInHand(); // cue potted → place it before playing on
   maybeAiTurn();
   if (!isAiTurn()) { resetHumanControls(); setSuggestedAim(); } // your shot → sensible controls + a suggested aim line
   refreshHumanPreview(); // if it's now your shot, show the aim line
 }
+
+// Recall a miss: restore the table + frame to before the missed shot (but the opponent KEEPS the foul
+// points) and hand it back to the offender to play again.
+function recallMiss() {
+  recallCount += 1;
+  const keepScores = [...game.frame.scores]; // opponent keeps the penalty; only the position is replayed
+  game.pieces = structuredClone(lastPreShot.pieces);
+  game.frame = structuredClone(lastPreShot.frame);
+  game.frame.scores = keepScores;
+  syncBallMeshes(game.pieces);
+  orient.clear();
+  updateScore();
+  status.textContent = `Miss called — ${playerLabel(game.frame.turn)} must play again`;
+  finishHandoff();
+}
+
+// Human incoming player: pause the hand-off and offer to play on or recall the miss.
+function offerMissChoice() {
+  awaitingMiss = true;
+  el('mp-sub').textContent = `${playerLabel(lastShooter)} could have hit the ball on. Play the position, or make them play again?`;
+  el('missprompt').classList.add('show');
+}
+el('miss-play').addEventListener('click', () => { el('missprompt').classList.remove('show'); awaitingMiss = false; recallCount = 0; finishHandoff(); });
+el('miss-again').addEventListener('click', () => { el('missprompt').classList.remove('show'); awaitingMiss = false; recallMiss(); });
 
 // Switch game (snooker / 8-ball / 9-ball): swap the variant, rebuild the table + camera for its
 // dimensions, drop the old balls, and rack a fresh frame. Physics/rules/AI follow the variant.

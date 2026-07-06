@@ -665,3 +665,13 @@ export function aiTurn(state, { difficulty = 'medium', rng = Math.random } = {})
   const { d, config } = difficultyConfig(difficulty, rng);
   return executeShot(state, d, chooseShot(state, config), rng);
 }
+
+// Miss rule: should the incoming player (state.turn) make the offender play the missed shot AGAIN?
+// The tactical reason to recall is that you CAN'T capitalise on the leave — so force them to keep
+// attempting it. We recall when the best pot available here is poor. Ball-in-hand → never recall
+// (you can place a shot). `state` is the settled, turn-flipped frame after the foul.
+export function shouldRecallMiss(state) {
+  const cue = state.pieces.find((p) => p.id === 'cue');
+  if (!cue || state.frame.ballInHand) return false;
+  return bestNextPotProb(state, { x: cue.pos.x, y: cue.pos.y }, false) < 0.3;
+}

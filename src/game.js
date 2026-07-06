@@ -92,6 +92,9 @@ function relaxOverlaps(pieces, r, b, iters = 20) {
 // (0 = normal); it must reach the engine or the human's jump slider is silently dropped here.
 export function takeShot(state, { angle, speed, spin = {}, cuePlacement = null, elevation = 0 } = {}) {
   const variant = state.variant;
+  // Snapshot the table + frame BEFORE the shot, so the miss rule can recall it (opponent makes the
+  // offender play again from here). Cheap deep copies; only used if the shot turns out to be a miss.
+  const preShot = { pieces: structuredClone(state.pieces), frame: structuredClone(state.frame) };
   let cue = state.pieces.find((p) => p.id === 'cue');
   if (state.frame.ballInHand) {
     const pos = cuePlacement || variant.defaultPlacement(state);
@@ -128,7 +131,9 @@ export function takeShot(state, { angle, speed, spin = {}, cuePlacement = null, 
   const firstContact = res.firstContact ? pieceById.get(res.firstContact) : null;
   const cueContacts = (res.cueContacts || []).map((id) => pieceById.get(id)).filter(Boolean);
 
-  const outcome = variant.applyOutcome(state.frame, { firstContact, potted, cuePotted, cueContacts, cushionHits: res.cushionHits || 0 });
+  // Could the striker have hit the ball-on from where the cue started? (Feeds the miss rule.)
+  const canHitBallOn = variant.canHitBallOn && cue ? variant.canHitBallOn(state, cue.pos) : true;
+  const outcome = variant.applyOutcome(state.frame, { firstContact, potted, cuePotted, cueContacts, cushionHits: res.cushionHits || 0, canHitBallOn });
 
   // reconcile the table: keep survivors at their settled positions
   state.pieces = state.pieces
@@ -143,6 +148,17 @@ export function takeShot(state, { angle, speed, spin = {}, cuePlacement = null, 
 
   // clean up any hair-thin interpenetration left by a tight cluster settling
   relaxOverlaps(state.pieces, variant.ball.radius, variant.bounds());
+
+  // FREE BALL: a foul that leaves the incoming player snookered (no direct line to any ball-on) awards
+  // them a free ball on the next stroke. Not when they get ball-in-hand (they can place a clear shot),
+  // nor when the frame is over. Judged from the cue's settled position on the incoming player's ball-on.
+  if (outcome.foul && !state.frame.frameOver && !state.frame.ballInHand && variant.canHitBallOn) {
+    const cueRest = state.pieces.find((p) => p.id === 'cue');
+    if (cueRest && !variant.canHitBallOn(state, cueRest.pos)) {
+      state.frame.freeBall = true;
+      outcome.freeBall = true; // surfaced to the renderer for the "FREE BALL" indicator
+    }
+  }
 
   // stalemate guard — break a deterministic livelock (see STALEMATE_REPEATS). A pot is progress, so
   // it resets the history; a repeated scoreless position eventually ends the frame instead of looping.
@@ -163,5 +179,6 @@ export function takeShot(state, { angle, speed, spin = {}, cuePlacement = null, 
     }
   }
 
-  return { timeline: res.timeline, meta, outcome };
+  // `preShot` lets the renderer recall a MISS (restore the table + frame, offender plays again).
+  return { timeline: res.timeline, meta, outcome, preShot };
 }

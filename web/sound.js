@@ -148,10 +148,11 @@ function applauseSamples(level) {
     const span = body + rel;
     const grains = Math.round(4 + level * 9); // 4..13 overlapping voices
     const out = audioCtx.createGain();
-    // overall shape: quick swell in, sustain through the body, then a long gentle fade across the release
+    // overall shape: BURST in fast (loudest right at the top, like a crowd erupting), settle back through
+    // the body, then a long gentle fade across the release
     out.gain.setValueAtTime(0.0001, t0);
-    out.gain.exponentialRampToValueAtTime(0.9 + level * 0.5, t0 + 0.18);
-    out.gain.setValueAtTime(0.9 + level * 0.5, t0 + body * 0.55);
+    out.gain.exponentialRampToValueAtTime(1.05 + level * 0.5, t0 + 0.07); // fast, loud burst in
+    out.gain.exponentialRampToValueAtTime(0.65 + level * 0.4, t0 + body * 0.6); // settle to a steadier clap
     out.gain.exponentialRampToValueAtTime(0.0001, t0 + span); // gradual fade-out
     const dry = audioCtx.createGain(); dry.gain.value = 0.9;
     dry.connect(out);
@@ -182,11 +183,14 @@ function applauseSamples(level) {
       const rate = 0.9 + Math.random() * 0.2; // detune → a fuller, non-identical crowd
       const frac = Math.pow(Math.random(), 1.7); // front-loaded: dense early, sparse late → natural thinning
       const st = t0 + frac * span * 0.9; // …last grains land well into the release
-      const fin = 0.08 + Math.random() * 0.12; // fade-in
+      const fin = 0.04 + Math.random() * 0.08 + frac * 0.16; // early grains snap in (punchy); later ones soften
       const fout = 0.3 + Math.random() * 0.35 + frac * 0.8; // later grains fade slower → a smoother tail
       const life = Math.max(fin + fout + 0.12, Math.min(0.5 + Math.random() * 1.0, t0 + span + 0.3 - st));
-      const thin = frac < 0.45 ? 1 : Math.max(0.12, 1 - (frac - 0.45) / 0.55); // full through the body, tapering off late
-      const peak = Math.max(0.0004, norm * (0.5 + Math.random() * 0.6) * thin * (0.7 + level * 0.6) * _sampleGains[si]);
+      // loudest + most dynamic at the start: emphasise early grains and give them a wider level spread,
+      // then ease down over the cheer so it settles into a steadier clap
+      const emph = 0.3 + 0.7 * Math.pow(1 - frac, 1.25); // frac 0 → ~1.0, frac 1 → 0.3
+      const dyn = 0.5 + Math.random() * (0.5 + 0.7 * (1 - frac)); // wider punch/variation early
+      const peak = Math.max(0.0004, norm * dyn * emph * (0.7 + level * 0.6) * _sampleGains[si]);
       const src = audioCtx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
       const consumed = (life + 0.1) * rate; // buffer-seconds this grain uses at its rate
       const off = Math.random() * Math.max(0, buf.duration - consumed); // vary the slice each time

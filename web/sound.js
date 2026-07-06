@@ -34,6 +34,7 @@ export function unlockAudio() {
       master = comp;
     }
     if (audioCtx.state === 'suspended') audioCtx.resume();
+    bakeClap(); // pre-render the clap timbre so applause is ready
   } catch { /* audio unavailable */ }
 }
 
@@ -52,18 +53,37 @@ function reverbIR() {
   return b;
 }
 
-// One realistic hand-clap: a SHARP broadband transient (near-instant attack, ~10 ms crack), not a
-// smooth filtered hiss. A single reused buffer with a steep exponential decay; per-clap band-pass gives
-// each pair of hands its own pitch/cupping.
-let _clapBuf = null;
-function clapBuf() {
-  if (_clapBuf) return _clapBuf;
-  const n = Math.ceil(audioCtx.sampleRate * 0.02);
-  const b = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
-  const d = b.getChannelData(0);
-  for (let j = 0; j < n; j++) d[j] = (Math.random() * 2 - 1) * Math.exp(-j / (n * 0.14)); // fast crack
-  _clapBuf = b;
-  return b;
+// One realistic hand-clap, BAKED once via an offline render so it can be played cheaply (one source,
+// no per-clap filters). A hand-clap = a low "thud" (air trapped between the palms, ~450 Hz) UNDER a mid
+// "smack" (~1 kHz), with the high sizzle rolled off — without the thud it just sounds like a dry tick /
+// rattling beans. Sharp attack, ~20 ms body. Cached in _clap; each clap plays it pitched for variety.
+let _clap = null, _baking = false;
+function bakeClap() {
+  if (_clap || _baking || !audioCtx) return;
+  _baking = true;
+  const SR = audioCtx.sampleRate;
+  const dur = 0.045;
+  const off = new OfflineAudioContext(1, Math.ceil(SR * dur), SR);
+  const n = Math.ceil(SR * dur);
+  const nb = off.createBuffer(1, n, SR); const nd = nb.getChannelData(0);
+  for (let j = 0; j < n; j++) nd[j] = Math.random() * 2 - 1;
+  const src = off.createBufferSource(); src.buffer = nb;
+  const env = off.createGain(); // sharp attack, exp decay ≈20 ms
+  env.gain.setValueAtTime(0.0001, 0);
+  env.gain.exponentialRampToValueAtTime(1, 0.0015);
+  env.gain.exponentialRampToValueAtTime(0.02, 0.02);
+  env.gain.exponentialRampToValueAtTime(0.0001, dur);
+  const thud = off.createBiquadFilter(); thud.type = 'lowpass'; thud.frequency.value = 460; thud.Q.value = 0.9;
+  const thudG = off.createGain(); thudG.gain.value = 1.15;
+  const smack = off.createBiquadFilter(); smack.type = 'bandpass'; smack.frequency.value = 1050; smack.Q.value = 0.8;
+  const smackG = off.createGain(); smackG.gain.value = 0.85;
+  const hicut = off.createBiquadFilter(); hicut.type = 'lowpass'; hicut.frequency.value = 2600; // kill the "beans" sizzle
+  src.connect(env);
+  env.connect(thud).connect(thudG).connect(hicut);
+  env.connect(smack).connect(smackG).connect(hicut);
+  hicut.connect(off.destination);
+  src.start(0);
+  off.startRendering().then((b) => { _clap = b; _baking = false; }).catch(() => { _baking = false; });
 }
 
 // Synthesised crowd applause/cheer — no audio files, so the app stays network-independent. `level`
@@ -87,16 +107,16 @@ export function applause(level = 0.5) {
     const conv = audioCtx.createConvolver(); conv.buffer = reverbIR();
     const wet = audioCtx.createGain(); wet.gain.value = 0.6;
     dry.connect(swell); conv.connect(wet); wet.connect(swell);
-    const buf = clapBuf();
-    const claps = Math.round(26 + level * 90);
+    bakeClap();
+    if (!_clap) return; // timbre not rendered yet (only in the first instant after unlock)
+    const claps = Math.round(20 + level * 70);
     for (let i = 0; i < claps; i++) {
       const ct = t0 + 0.01 + Math.random() * (dur - 0.1);
-      const src = audioCtx.createBufferSource(); src.buffer = buf; src.playbackRate.value = 0.8 + Math.random() * 0.5;
-      const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass';
-      bp.frequency.value = 900 + Math.random() * 1900; bp.Q.value = 0.6 + Math.random() * 0.5;
-      const g = audioCtx.createGain(); g.gain.value = 0.9 + Math.random() * 1.4;
-      src.connect(bp).connect(g); g.connect(dry); g.connect(conv); // to both the dry path and the room
-      src.start(ct); src.stop(ct + 0.06);
+      const src = audioCtx.createBufferSource(); src.buffer = _clap;
+      src.playbackRate.value = 0.82 + Math.random() * 0.42; // pitch each pair of hands a little differently
+      const g = audioCtx.createGain(); g.gain.value = 0.85 + Math.random() * 1.3;
+      src.connect(g); g.connect(dry); g.connect(conv); // dry + into the room
+      src.start(ct); src.stop(ct + 0.07);
     }
     if (level > 0.65) { // a low crowd roar under a big cheer
       const rlen = Math.ceil(audioCtx.sampleRate * dur);

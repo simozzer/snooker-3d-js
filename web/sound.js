@@ -13,8 +13,18 @@ let enabled = () => true;
 // unlock; each cheer plays randomly picked / detuned / windowed slices layered together so it varies.
 // If they're absent or fail to decode we fall back to the synthesised applause below, so the app
 // still works with no assets. `_samples`: null = not tried yet, [] = tried (none), [buf…] = ready.
-const SAMPLE_URLS = ['./audio/applause-1.wav', './audio/applause-2.oga'];
-let _samples = null, _samplesLoading = false;
+const SAMPLE_URLS = ['./audio/applause-1.wav', './audio/applause-2.oga', './audio/applause-3.ogg', './audio/applause-4.ogg'];
+let _samples = null, _sampleGains = null, _samplesLoading = false;
+// The clips were recorded at very different levels; measure each one's peak so grains from a quiet clip
+// and a loud clip contribute equally (else the bed sounds lumpy). Subsampled — plenty accurate for a peak.
+function bufPeak(b) {
+  let peak = 0;
+  for (let ch = 0; ch < b.numberOfChannels; ch++) {
+    const d = b.getChannelData(ch);
+    for (let i = 0; i < d.length; i += 128) { const a = Math.abs(d[i]); if (a > peak) peak = a; }
+  }
+  return peak || 1;
+}
 function loadSamples() {
   if (_samples !== null || _samplesLoading || !audioCtx) return;
   _samplesLoading = true;
@@ -24,8 +34,11 @@ function loadSamples() {
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('missing'))))
       .then((a) => ctx.decodeAudioData(a))
       .catch(() => null),
-  )).then((bufs) => { _samples = bufs.filter(Boolean); _samplesLoading = false; })
-    .catch(() => { _samples = []; _samplesLoading = false; });
+  )).then((bufs) => {
+    _samples = bufs.filter(Boolean);
+    _sampleGains = _samples.map((b) => Math.min(3, Math.max(0.4, 0.6 / bufPeak(b)))); // normalise clip loudness
+    _samplesLoading = false;
+  }).catch(() => { _samples = []; _sampleGains = []; _samplesLoading = false; });
 }
 
 // Wire up: remember the enable check and resume audio on the first user gesture (browsers require one).
@@ -144,7 +157,8 @@ function applauseSamples(level) {
     out.connect(master || audioCtx.destination);
     const norm = 1 / Math.sqrt(grains); // keep the summed level in check as grains pile up
     for (let i = 0; i < grains; i++) {
-      const buf = _samples[(Math.random() * _samples.length) | 0];
+      const si = (Math.random() * _samples.length) | 0;
+      const buf = _samples[si];
       const rate = 0.9 + Math.random() * 0.2; // detune → a fuller, non-identical crowd
       const frac = Math.pow(Math.random(), 1.7); // front-loaded: dense early, sparse late → natural thinning
       const st = t0 + frac * span * 0.9; // …last grains land well into the release
@@ -152,7 +166,7 @@ function applauseSamples(level) {
       const fout = 0.3 + Math.random() * 0.35 + frac * 0.8; // later grains fade slower → a smoother tail
       const life = Math.max(fin + fout + 0.12, Math.min(0.5 + Math.random() * 1.0, t0 + span + 0.3 - st));
       const thin = frac < 0.45 ? 1 : Math.max(0.12, 1 - (frac - 0.45) / 0.55); // full through the body, tapering off late
-      const peak = Math.max(0.0004, norm * (0.5 + Math.random() * 0.6) * thin * (0.7 + level * 0.6));
+      const peak = Math.max(0.0004, norm * (0.5 + Math.random() * 0.6) * thin * (0.7 + level * 0.6) * _sampleGains[si]);
       const src = audioCtx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
       const consumed = (life + 0.1) * rate; // buffer-seconds this grain uses at its rate
       const off = Math.random() * Math.max(0, buf.duration - consumed); // vary the slice each time

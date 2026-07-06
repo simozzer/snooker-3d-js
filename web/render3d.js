@@ -1628,6 +1628,10 @@ function playTrickShot(shot) {
 // Shot settled → judge the goal, show the verdict, and gate the Next button.
 function onTrickShotEnd() {
   trick.awaiting = false;
+  // Settle the balls to their TRUE final rest. The pot replay cuts ~0.9s after the drop (for pacing),
+  // which can freeze the cue mid-roll; unlike a normal frame (which resyncs to the rules' resting
+  // layout in onReplayEnd), Trick Shots has no rules pass, so snap to the timeline's final positions.
+  if (timeline.length) applyState(replayState(timeline, planCache, endT), 0);
   const res = trick.lastRes;
   const passed = res && trick.level.goal(res);
   trick.passed = passed;

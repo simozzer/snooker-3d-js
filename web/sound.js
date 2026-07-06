@@ -37,35 +37,66 @@ export function unlockAudio() {
   } catch { /* audio unavailable */ }
 }
 
+// A hall reverb impulse (decaying stereo noise), synthesised once and cached — routing the claps
+// through it blurs them into a room, which is most of what makes a crowd read as a crowd.
+let _reverbIR = null;
+function reverbIR() {
+  if (_reverbIR) return _reverbIR;
+  const len = Math.ceil(audioCtx.sampleRate * 1.5);
+  const b = audioCtx.createBuffer(2, len, audioCtx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = b.getChannelData(ch);
+    for (let j = 0; j < len; j++) d[j] = (Math.random() * 2 - 1) * Math.pow(1 - j / len, 2.6);
+  }
+  _reverbIR = b;
+  return b;
+}
+
+// One realistic hand-clap: a SHARP broadband transient (near-instant attack, ~10 ms crack), not a
+// smooth filtered hiss. A single reused buffer with a steep exponential decay; per-clap band-pass gives
+// each pair of hands its own pitch/cupping.
+let _clapBuf = null;
+function clapBuf() {
+  if (_clapBuf) return _clapBuf;
+  const n = Math.ceil(audioCtx.sampleRate * 0.02);
+  const b = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
+  const d = b.getChannelData(0);
+  for (let j = 0; j < n; j++) d[j] = (Math.random() * 2 - 1) * Math.exp(-j / (n * 0.14)); // fast crack
+  _clapBuf = b;
+  return b;
+}
+
 // Synthesised crowd applause/cheer — no audio files, so the app stays network-independent. `level`
 // (0..1) scales loudness, length and density: a light ripple for a routine pot up to a full roar for a
-// century / frame win. Built from many short band-passed noise "claps" at random times under a shared
-// swell envelope, plus a low crowd roar beneath the big cheers.
+// century / frame win. Sharp clap transients scattered in time, sent through a hall reverb (wet+dry),
+// with a low crowd roar under the big cheers.
 export function applause(level = 0.5) {
   if (!enabled() || !audioCtx || audioCtx.state !== 'running') return;
   try {
     const t0 = audioCtx.currentTime;
-    const dur = 1.1 + level * 2.4;
+    const dur = 1.1 + level * 2.6;
+    // overall swell envelope, feeding the compressor/output
     const swell = audioCtx.createGain();
     swell.gain.setValueAtTime(0.0001, t0);
-    swell.gain.exponentialRampToValueAtTime(0.32 + level * 0.5, t0 + 0.12); // swell in
-    swell.gain.setValueAtTime(0.32 + level * 0.5, t0 + dur * 0.55);
+    swell.gain.exponentialRampToValueAtTime(0.5 + level * 0.6, t0 + 0.15); // swell in
+    swell.gain.setValueAtTime(0.5 + level * 0.6, t0 + dur * 0.5);
     swell.gain.exponentialRampToValueAtTime(0.0001, t0 + dur); // and fade
     swell.connect(master || audioCtx.destination);
-    // one short noise buffer, reused by every clap source (cheap)
-    const clapLen = Math.ceil(audioCtx.sampleRate * 0.03);
-    const buf = audioCtx.createBuffer(1, clapLen, audioCtx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let j = 0; j < clapLen; j++) { const e = 1 - j / clapLen; d[j] = (Math.random() * 2 - 1) * e * e; }
-    const claps = Math.round(22 + level * 66);
+    // dry claps + a reverberated copy → the "room"
+    const dry = audioCtx.createGain(); dry.gain.value = 0.55;
+    const conv = audioCtx.createConvolver(); conv.buffer = reverbIR();
+    const wet = audioCtx.createGain(); wet.gain.value = 0.6;
+    dry.connect(swell); conv.connect(wet); wet.connect(swell);
+    const buf = clapBuf();
+    const claps = Math.round(26 + level * 90);
     for (let i = 0; i < claps; i++) {
-      const ct = t0 + 0.02 + Math.random() * (dur - 0.12);
-      const src = audioCtx.createBufferSource(); src.buffer = buf;
+      const ct = t0 + 0.01 + Math.random() * (dur - 0.1);
+      const src = audioCtx.createBufferSource(); src.buffer = buf; src.playbackRate.value = 0.8 + Math.random() * 0.5;
       const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass';
-      bp.frequency.value = 1400 + Math.random() * 2500; bp.Q.value = 0.9;
-      const g = audioCtx.createGain(); g.gain.value = 0.1 + Math.random() * 0.16;
-      src.connect(bp).connect(g).connect(swell);
-      src.start(ct); src.stop(ct + 0.05);
+      bp.frequency.value = 900 + Math.random() * 1900; bp.Q.value = 0.6 + Math.random() * 0.5;
+      const g = audioCtx.createGain(); g.gain.value = 0.9 + Math.random() * 1.4;
+      src.connect(bp).connect(g); g.connect(dry); g.connect(conv); // to both the dry path and the room
+      src.start(ct); src.stop(ct + 0.06);
     }
     if (level > 0.65) { // a low crowd roar under a big cheer
       const rlen = Math.ceil(audioCtx.sampleRate * dur);
@@ -73,10 +104,10 @@ export function applause(level = 0.5) {
       const rd = rbuf.getChannelData(0);
       for (let j = 0; j < rlen; j++) rd[j] = Math.random() * 2 - 1;
       const rsrc = audioCtx.createBufferSource(); rsrc.buffer = rbuf;
-      const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 480;
+      const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 450;
       const rg = audioCtx.createGain();
       rg.gain.setValueAtTime(0.0001, t0);
-      rg.gain.exponentialRampToValueAtTime(0.22 * level, t0 + 0.3);
+      rg.gain.exponentialRampToValueAtTime(0.28 * level, t0 + 0.35);
       rg.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
       rsrc.connect(lp).connect(rg).connect(master || audioCtx.destination);
       rsrc.start(t0); rsrc.stop(t0 + dur);

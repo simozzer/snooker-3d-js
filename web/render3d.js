@@ -121,8 +121,10 @@ function rebuildTable() {
 }
 rebuildTable();
 // A faint Lowry-esque arena + audience ringing the table — pure background atmosphere (built once,
-// sized to the opening table; sits well beyond any camera so it never obscures play).
-scene.add(buildCrowd(HX * S, HY * S));
+// sized to the opening table; sits well beyond any camera so it never obscures play). Its eyes track
+// the ball each frame (crowd.update), so the gaze follows the action.
+const crowd = buildCrowd(HX * S, HY * S);
+scene.add(crowd.group);
 
 // --- balls -----------------------------------------------------------------------------------
 // Ball appearance (variant-driven mesh construction) lives in balls3d.js; the renderer owns the
@@ -1755,6 +1757,8 @@ function frame(now) {
   }
   lastAimDeg = aimDeg;
   updateNets(pocketNets, now); // swing any pocket net that a ball has just dropped into
+  const cueM = ballMeshes.get('cue'); // the crowd's gaze tracks the cue ball (table centre if it's gone)
+  if (cueM) crowd.update(cueM.grp.position.x, cueM.grp.position.y, cueM.grp.position.z);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }

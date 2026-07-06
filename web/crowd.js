@@ -39,10 +39,17 @@ export function buildCrowd(ex, ez) {
 
   // spectators: instanced thin bodies + dot heads, scattered across the tiers
   const N = 1100;
-  const bodyGeo = new THREE.CylinderGeometry(0.42, 0.72, 1, 5); // unit height, scaled per instance
-  const headGeo = new THREE.SphereGeometry(0.72, 6, 5);
+  const HEADR = 0.72;
+  const bodyGeo = new THREE.CylinderGeometry(0.42, HEADR, 1, 5); // unit height, scaled per instance
+  const headGeo = new THREE.SphereGeometry(HEADR, 6, 5);
   const bodies = new THREE.InstancedMesh(bodyGeo, new THREE.MeshBasicMaterial(), N);
   const heads = new THREE.InstancedMesh(headGeo, new THREE.MeshBasicMaterial(), N);
+  // a pair of pale eyes per spectator (2 instances each) — repositioned every frame onto the side of
+  // the head facing the ball, so the whole crowd's gaze tracks the action. A few look elsewhere.
+  const eyeGeo = new THREE.SphereGeometry(0.26, 6, 5);
+  const eyes = new THREE.InstancedMesh(eyeGeo, new THREE.MeshBasicMaterial({ color: 0xbfc2b8 }), N * 2);
+  eyes.frustumCulled = false;
+  const spec = new Array(N); // { x,y,z head-centre; gaze:null=follow the ball | {dx,dy,dz}=a fixed distracted look }
 
   // muted Lowry palette, kept deliberately dark so the crowd stays a faint suggestion against the black
   const coats = [0x22262d, 0x281e18, 0x2c2020, 0x1c222a, 0x2a271f, 0x242429, 0x30271f];
@@ -65,18 +72,49 @@ export function buildCrowd(ex, ez) {
     s.set(1, h, 1); p.set(x, y + h / 2, z); m.compose(p, q, s); bodies.setMatrixAt(i, m);
     c.setHex(pick(coats)).multiplyScalar(0.55 + Math.random() * 0.4); bodies.setColorAt(i, c);
     // head
-    s.set(1, 1, 1); p.set(x, y + h + 0.55, z); m.compose(p, q, s); heads.setMatrixAt(i, m);
+    const hy = y + h + 0.55;
+    s.set(1, 1, 1); p.set(x, hy, z); m.compose(p, q, s); heads.setMatrixAt(i, m);
     c.setHex(pick(skins)).multiplyScalar(0.5 + Math.random() * 0.35); heads.setColorAt(i, c);
+    // ~13% are distracted — a fixed gaze somewhere other than the ball (down at a phone, off to a mate)
+    let gaze = null;
+    if (Math.random() < 0.13) {
+      const da = Math.random() * Math.PI * 2, dtilt = -0.15 - Math.random() * 0.55;
+      const gl = Math.hypot(Math.cos(da), dtilt, Math.sin(da)) || 1;
+      gaze = { dx: Math.cos(da) / gl, dy: dtilt / gl, dz: Math.sin(da) / gl };
+    }
+    spec[i] = { x, y: hy, z, gaze };
   }
   bodies.instanceMatrix.needsUpdate = true;
   heads.instanceMatrix.needsUpdate = true;
   bodies.instanceColor.needsUpdate = true;
   heads.instanceColor.needsUpdate = true;
-  g.add(bodies, heads);
+  g.add(bodies, heads, eyes);
 
   // static, non-interactive, unshadowed background
   g.traverse((o) => { o.castShadow = false; o.receiveShadow = false; o.raycast = () => {}; });
   g.matrixAutoUpdate = false;
   g.updateMatrixWorld(true);
-  return g;
+
+  // Repoint every spectator's eyes onto the head-side facing (tx,ty,tz) — the live ball. Distracted
+  // people keep their fixed gaze. Skips the work when the ball hasn't moved (idle turns cost nothing).
+  const EYE_SEP = 0.30, EYE_FWD = HEADR * 0.86, EYE_UP = HEADR * 0.1;
+  const em = new THREE.Matrix4();
+  let lastT = null;
+  function update(tx, ty, tz) {
+    if (lastT && Math.abs(tx - lastT[0]) + Math.abs(ty - lastT[1]) + Math.abs(tz - lastT[2]) < 0.03) return;
+    lastT = [tx, ty, tz];
+    for (let i = 0; i < N; i++) {
+      const sp = spec[i];
+      let dx, dy, dz;
+      if (sp.gaze) { dx = sp.gaze.dx; dy = sp.gaze.dy; dz = sp.gaze.dz; }
+      else { dx = tx - sp.x; dy = ty - sp.y; dz = tz - sp.z; const L = Math.hypot(dx, dy, dz) || 1; dx /= L; dy /= L; dz /= L; }
+      let rx = dz, rz = -dx; const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl; // horizontal right = up × dir
+      const ex = sp.x + dx * EYE_FWD, ey = sp.y + dy * EYE_FWD + EYE_UP, ez = sp.z + dz * EYE_FWD;
+      em.makeTranslation(ex + rx * EYE_SEP, ey, ez + rz * EYE_SEP); eyes.setMatrixAt(2 * i, em);
+      em.makeTranslation(ex - rx * EYE_SEP, ey, ez - rz * EYE_SEP); eyes.setMatrixAt(2 * i + 1, em);
+    }
+    eyes.instanceMatrix.needsUpdate = true;
+  }
+  update(0, 0, 0); // initial gaze toward the table centre
+  return { group: g, update };
 }

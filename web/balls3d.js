@@ -45,6 +45,7 @@ export function makeBallMesh(piece, variant, R, S) {
   const grp = new THREE.Group(); // outer: positioned only
   const spinner = new THREE.Group(); // inner: rotates to show spin
   grp.add(spinner);
+  const isCue = piece.group === 'cue' || piece.id === 'cue';
   const col = ballColor(piece, variant);
   const stripe = variant.isStripe ? variant.isStripe(piece) : false;
   const base = stripe ? new THREE.Color(CUE_FALLBACK) : col; // a stripe = white ball + a coloured band
@@ -55,8 +56,11 @@ export function makeBallMesh(piece, variant, R, S) {
     const band = new THREE.Mesh(new THREE.SphereGeometry(R * S * 1.003, 28, 12, 0, Math.PI * 2, Math.PI * 0.36, Math.PI * 0.28), new THREE.MeshStandardMaterial({ color: col, roughness: 0.18 }));
     spinner.add(band);
   }
-  const label = variant.label ? variant.label(piece) : '';
-  if (label) {
+  // number decal for numbered object balls only — never the cue. (Some layouts, e.g. Trick Shots, give
+  // the cue piece an id but no group/number, so variant.label() would return "undefined"/"0" and stamp
+  // that on the cue ball; guard on isCue and drop any stray "undefined".)
+  const label = isCue ? '' : (variant.label ? variant.label(piece) : '');
+  if (label && label !== 'undefined') {
     grp.add(numberSprite(label, R, S)); // numbered ball: a camera-facing decal (doesn't spin with the ball)
   } else {
     const spot = new THREE.Mesh(new THREE.SphereGeometry(R * S * 0.28, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffffff }));

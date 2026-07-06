@@ -116,38 +116,44 @@ export function applause(level = 0.5) {
   applauseSynth(level);
 }
 
-// Real-crowd applause from the vendored samples. Layers a few voices, each a randomly picked clip
-// played from a random offset, subtly detuned — so a real recording becomes a bigger, always-varying
-// crowd instead of the same clip every time. Each voice fades in (no click when starting mid-clip),
-// sustains, then eases out over a ~0.5 s release; a parallel hall reverb keeps ringing for ~1.5 s after
-// the dry claps fade, so the cheer decays into the room rather than chopping off at the clip's end.
+// Real-crowd applause built as a BED of overlapping grains. Rather than play N clips once, we scatter
+// many short slices across the cheer's span — each a randomly picked sample, from a random offset,
+// subtly detuned, with its own fade-in / hold / fade-out at its own level. As one grain fades out
+// another fades in, so the crowd never repeats and never chops; a swell shape makes it fullest in the
+// middle and quiet at the edges, and a parallel hall reverb rings on after the last grain. `level`
+// (0..1) scales the span, how many grains overlap, and their loudness — a light ripple up to a roar.
 function applauseSamples(level) {
   try {
     const t0 = audioCtx.currentTime;
-    const dur = 1.1 + level * 2.6;
-    const REL = 0.5; // release fade length — the cure for the abrupt cut-off
-    const out = audioCtx.createGain(); out.gain.value = 0.85 + level * 0.5;
-    const dry = audioCtx.createGain(); dry.gain.value = 0.8;
+    const dur = 1.0 + level * 3.0; // span of the cheer: routine ripple → long roar
+    const grains = Math.round(3 + level * 8); // 3..11 overlapping voices
+    const out = audioCtx.createGain(); out.gain.value = 0.9 + level * 0.5;
+    const dry = audioCtx.createGain(); dry.gain.value = 0.82;
     const conv = audioCtx.createConvolver(); conv.buffer = reverbIR(); // the room tail (echo/decay)
-    const wet = audioCtx.createGain(); wet.gain.value = 0.5 + level * 0.2;
+    const wet = audioCtx.createGain(); wet.gain.value = 0.5 + level * 0.25;
     dry.connect(out); conv.connect(wet); wet.connect(out);
     out.connect(master || audioCtx.destination);
-    const voices = level > 0.6 ? 3 : level > 0.3 ? 2 : 1; // more hands for a bigger moment
-    for (let v = 0; v < voices; v++) {
+    const norm = 1 / Math.sqrt(grains); // keep the summed level in check as grains pile up
+    for (let i = 0; i < grains; i++) {
       const buf = _samples[(Math.random() * _samples.length) | 0];
-      const rate = 0.93 + Math.random() * 0.14; // subtle detune → a fuller, non-identical crowd
+      const rate = 0.9 + Math.random() * 0.2; // detune → a fuller, non-identical crowd
+      const frac = Math.random(); // where in the cheer this grain sits (0..1)
+      const st = t0 + frac * dur * 0.82; // …leaving room for the last grains to fade before the tail
+      const fin = 0.1 + Math.random() * 0.12; // fade-in
+      const fout = 0.25 + Math.random() * 0.3; // fade-out
+      const life = Math.max(fin + fout + 0.12, Math.min(0.5 + Math.random() * 1.1, t0 + dur + 0.4 - st));
+      const hump = Math.sin(frac * Math.PI); // swell: quiet at the ends, fullest mid-cheer
+      const peak = Math.max(0.0004, norm * (0.5 + Math.random() * 0.7) * (0.4 + 0.6 * hump) * (0.7 + level * 0.6));
       const src = audioCtx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
-      const consumed = (dur + 0.15) * rate; // buffer-seconds this voice will use at its rate
+      const consumed = (life + 0.1) * rate; // buffer-seconds this grain uses at its rate
       const off = Math.random() * Math.max(0, buf.duration - consumed); // vary the slice each time
       const g = audioCtx.createGain();
-      const peak = (0.7 + Math.random() * 0.5) / Math.sqrt(voices);
-      const st = t0 + Math.random() * 0.06 * v; // stagger the voices a touch
       g.gain.setValueAtTime(0.0001, st);
-      g.gain.exponentialRampToValueAtTime(peak, st + 0.08); // fade in
-      g.gain.setValueAtTime(peak, t0 + Math.max(0.12, dur - REL)); // sustain…
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur); // …then ease out
+      g.gain.exponentialRampToValueAtTime(peak, st + fin); // fade in
+      g.gain.setValueAtTime(peak, st + life - fout); // hold…
+      g.gain.exponentialRampToValueAtTime(0.0001, st + life); // …then fade out
       src.connect(g); g.connect(dry); g.connect(conv); // dry + into the room
-      src.start(st, off); src.stop(t0 + dur + 0.08);
+      src.start(st, off); src.stop(st + life + 0.05);
     }
   } catch { /* ignore a dropped cheer */ }
 }

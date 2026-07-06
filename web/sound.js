@@ -119,15 +119,24 @@ export function applause(level = 0.5) {
 // Real-crowd applause built as a BED of overlapping grains. Rather than play N clips once, we scatter
 // many short slices across the cheer's span — each a randomly picked sample, from a random offset,
 // subtly detuned, with its own fade-in / hold / fade-out at its own level. As one grain fades out
-// another fades in, so the crowd never repeats and never chops; a swell shape makes it fullest in the
-// middle and quiet at the edges, and a parallel hall reverb rings on after the last grain. `level`
-// (0..1) scales the span, how many grains overlap, and their loudness — a light ripple up to a roar.
+// another fades in, so the crowd never repeats and never chops. Grains are front-loaded (dense at the
+// start, thinning out toward the end) and later ones are quieter and fade slower, so — together with a
+// long, gentle release on the whole bus and a hall-reverb tail — the cheer dies away gradually like a
+// real crowd winding down rather than stopping. `level` (0..1) scales the body length, the release
+// length, how many grains overlap and their loudness — a light ripple up to a roar.
 function applauseSamples(level) {
   try {
     const t0 = audioCtx.currentTime;
-    const dur = 1.0 + level * 3.0; // span of the cheer: routine ripple → long roar
-    const grains = Math.round(3 + level * 8); // 3..11 overlapping voices
-    const out = audioCtx.createGain(); out.gain.value = 0.9 + level * 0.5;
+    const body = 0.8 + level * 2.0; // the main cheer
+    const rel = 1.3 + level * 2.2; // a long, gradual wind-down after it
+    const span = body + rel;
+    const grains = Math.round(4 + level * 9); // 4..13 overlapping voices
+    const out = audioCtx.createGain();
+    // overall shape: quick swell in, sustain through the body, then a long gentle fade across the release
+    out.gain.setValueAtTime(0.0001, t0);
+    out.gain.exponentialRampToValueAtTime(0.9 + level * 0.5, t0 + 0.18);
+    out.gain.setValueAtTime(0.9 + level * 0.5, t0 + body * 0.55);
+    out.gain.exponentialRampToValueAtTime(0.0001, t0 + span); // gradual fade-out
     const dry = audioCtx.createGain(); dry.gain.value = 0.82;
     const conv = audioCtx.createConvolver(); conv.buffer = reverbIR(); // the room tail (echo/decay)
     const wet = audioCtx.createGain(); wet.gain.value = 0.5 + level * 0.25;
@@ -137,13 +146,13 @@ function applauseSamples(level) {
     for (let i = 0; i < grains; i++) {
       const buf = _samples[(Math.random() * _samples.length) | 0];
       const rate = 0.9 + Math.random() * 0.2; // detune → a fuller, non-identical crowd
-      const frac = Math.random(); // where in the cheer this grain sits (0..1)
-      const st = t0 + frac * dur * 0.82; // …leaving room for the last grains to fade before the tail
-      const fin = 0.1 + Math.random() * 0.12; // fade-in
-      const fout = 0.25 + Math.random() * 0.3; // fade-out
-      const life = Math.max(fin + fout + 0.12, Math.min(0.5 + Math.random() * 1.1, t0 + dur + 0.4 - st));
-      const hump = Math.sin(frac * Math.PI); // swell: quiet at the ends, fullest mid-cheer
-      const peak = Math.max(0.0004, norm * (0.5 + Math.random() * 0.7) * (0.4 + 0.6 * hump) * (0.7 + level * 0.6));
+      const frac = Math.pow(Math.random(), 1.7); // front-loaded: dense early, sparse late → natural thinning
+      const st = t0 + frac * span * 0.9; // …last grains land well into the release
+      const fin = 0.08 + Math.random() * 0.12; // fade-in
+      const fout = 0.3 + Math.random() * 0.35 + frac * 0.8; // later grains fade slower → a smoother tail
+      const life = Math.max(fin + fout + 0.12, Math.min(0.5 + Math.random() * 1.0, t0 + span + 0.3 - st));
+      const thin = frac < 0.45 ? 1 : Math.max(0.12, 1 - (frac - 0.45) / 0.55); // full through the body, tapering off late
+      const peak = Math.max(0.0004, norm * (0.5 + Math.random() * 0.6) * thin * (0.7 + level * 0.6));
       const src = audioCtx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
       const consumed = (life + 0.1) * rate; // buffer-seconds this grain uses at its rate
       const off = Math.random() * Math.max(0, buf.duration - consumed); // vary the slice each time

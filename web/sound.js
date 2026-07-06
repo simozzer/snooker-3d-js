@@ -137,9 +137,9 @@ export function applause(level = 0.5) {
 // subtly detuned, with its own fade-in / hold / fade-out at its own level. As one grain fades out
 // another fades in, so the crowd never repeats and never chops. Grains are front-loaded (dense at the
 // start, thinning out toward the end) and later ones are quieter and fade slower, so — together with a
-// long, gentle release on the whole bus and a hall-reverb tail — the cheer dies away gradually like a
-// real crowd winding down rather than stopping. `level` (0..1) scales the body length, the release
-// length, how many grains overlap and their loudness — a light ripple up to a roar.
+// long, gentle release on the whole bus and a fading, darkening echo tail — the cheer dies away
+// gradually like a real crowd winding down rather than stopping. `level` (0..1) scales the body length,
+// the release length, how many grains overlap and their loudness — a light ripple up to a roar.
 function applauseSamples(level) {
   try {
     const t0 = audioCtx.currentTime;
@@ -153,10 +153,24 @@ function applauseSamples(level) {
     out.gain.exponentialRampToValueAtTime(0.9 + level * 0.5, t0 + 0.18);
     out.gain.setValueAtTime(0.9 + level * 0.5, t0 + body * 0.55);
     out.gain.exponentialRampToValueAtTime(0.0001, t0 + span); // gradual fade-out
-    const dry = audioCtx.createGain(); dry.gain.value = 0.82;
-    const conv = audioCtx.createConvolver(); conv.buffer = reverbIR(); // the room tail (echo/decay)
-    const wet = audioCtx.createGain(); wet.gain.value = 0.5 + level * 0.25;
-    dry.connect(out); conv.connect(wet); wet.connect(out);
+    const dry = audioCtx.createGain(); dry.gain.value = 0.9;
+    dry.connect(out);
+    // Space is now mostly a FADING FEEDBACK ECHO rather than reverb. A slap delay feeds back through a
+    // lowpass whose cutoff sweeps DOWN over the cheer, so each repeat is quieter AND darker — the tail
+    // dissolves into muffled echoes instead of a bright reverb wash.
+    const delay = audioCtx.createDelay(1.0); delay.delayTime.value = 0.18 + Math.random() * 0.06;
+    const fbLP = audioCtx.createBiquadFilter(); fbLP.type = 'lowpass'; fbLP.Q.value = 0.3;
+    fbLP.frequency.setValueAtTime(3000, t0); // echoes start fairly open…
+    fbLP.frequency.exponentialRampToValueAtTime(480, t0 + span); // …then sweep down to muffled as they fade
+    const fb = audioCtx.createGain(); fb.gain.value = 0.52 + level * 0.12; // <1 so repeats decay
+    const echo = audioCtx.createGain(); echo.gain.value = 0.5 + level * 0.22;
+    delay.connect(fbLP).connect(fb).connect(delay); // feedback loop
+    delay.connect(echo).connect(out);
+    // just a touch of darkened reverb for glue — much less than before, and rolled off up top
+    const conv = audioCtx.createConvolver(); conv.buffer = reverbIR();
+    const revLP = audioCtx.createBiquadFilter(); revLP.type = 'lowpass'; revLP.frequency.value = 2000; // kill the bright wash
+    const wet = audioCtx.createGain(); wet.gain.value = 0.14 + level * 0.08;
+    conv.connect(revLP).connect(wet).connect(out);
     // roll off the low end — recorded crowds carry a lot of room rumble/boom that muddies the mix
     const hp = audioCtx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 260; hp.Q.value = 0.5;
     const hp2 = audioCtx.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 260; hp2.Q.value = 0.5; // 2nd order → steeper (~24 dB/oct)
@@ -181,7 +195,7 @@ function applauseSamples(level) {
       g.gain.exponentialRampToValueAtTime(peak, st + fin); // fade in
       g.gain.setValueAtTime(peak, st + life - fout); // hold…
       g.gain.exponentialRampToValueAtTime(0.0001, st + life); // …then fade out
-      src.connect(g); g.connect(dry); g.connect(conv); // dry + into the room
+      src.connect(g); g.connect(dry); g.connect(delay); g.connect(conv); // dry + echo + a little room
       src.start(st, off); src.stop(st + life + 0.05);
     }
   } catch { /* ignore a dropped cheer */ }

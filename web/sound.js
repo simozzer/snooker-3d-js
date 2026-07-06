@@ -37,6 +37,53 @@ export function unlockAudio() {
   } catch { /* audio unavailable */ }
 }
 
+// Synthesised crowd applause/cheer — no audio files, so the app stays network-independent. `level`
+// (0..1) scales loudness, length and density: a light ripple for a routine pot up to a full roar for a
+// century / frame win. Built from many short band-passed noise "claps" at random times under a shared
+// swell envelope, plus a low crowd roar beneath the big cheers.
+export function applause(level = 0.5) {
+  if (!enabled() || !audioCtx || audioCtx.state !== 'running') return;
+  try {
+    const t0 = audioCtx.currentTime;
+    const dur = 1.1 + level * 2.4;
+    const swell = audioCtx.createGain();
+    swell.gain.setValueAtTime(0.0001, t0);
+    swell.gain.exponentialRampToValueAtTime(0.32 + level * 0.5, t0 + 0.12); // swell in
+    swell.gain.setValueAtTime(0.32 + level * 0.5, t0 + dur * 0.55);
+    swell.gain.exponentialRampToValueAtTime(0.0001, t0 + dur); // and fade
+    swell.connect(master || audioCtx.destination);
+    // one short noise buffer, reused by every clap source (cheap)
+    const clapLen = Math.ceil(audioCtx.sampleRate * 0.03);
+    const buf = audioCtx.createBuffer(1, clapLen, audioCtx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let j = 0; j < clapLen; j++) { const e = 1 - j / clapLen; d[j] = (Math.random() * 2 - 1) * e * e; }
+    const claps = Math.round(22 + level * 66);
+    for (let i = 0; i < claps; i++) {
+      const ct = t0 + 0.02 + Math.random() * (dur - 0.12);
+      const src = audioCtx.createBufferSource(); src.buffer = buf;
+      const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.value = 1400 + Math.random() * 2500; bp.Q.value = 0.9;
+      const g = audioCtx.createGain(); g.gain.value = 0.1 + Math.random() * 0.16;
+      src.connect(bp).connect(g).connect(swell);
+      src.start(ct); src.stop(ct + 0.05);
+    }
+    if (level > 0.65) { // a low crowd roar under a big cheer
+      const rlen = Math.ceil(audioCtx.sampleRate * dur);
+      const rbuf = audioCtx.createBuffer(1, rlen, audioCtx.sampleRate);
+      const rd = rbuf.getChannelData(0);
+      for (let j = 0; j < rlen; j++) rd[j] = Math.random() * 2 - 1;
+      const rsrc = audioCtx.createBufferSource(); rsrc.buffer = rbuf;
+      const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 480;
+      const rg = audioCtx.createGain();
+      rg.gain.setValueAtTime(0.0001, t0);
+      rg.gain.exponentialRampToValueAtTime(0.22 * level, t0 + 0.3);
+      rg.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      rsrc.connect(lp).connect(rg).connect(master || audioCtx.destination);
+      rsrc.start(t0); rsrc.stop(t0 + dur);
+    }
+  } catch { /* ignore a dropped cheer */ }
+}
+
 export function knock(kind, intensity) {
   if (!enabled() || !audioCtx || audioCtx.state !== 'running') return;
   try {

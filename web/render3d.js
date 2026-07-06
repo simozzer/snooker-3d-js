@@ -23,7 +23,7 @@ import { build147 } from '../src/exhibition.js';
 import { getLevel, runTrickShot, findSolution, CURATED_COUNT } from '../src/trickshots.js';
 import { buildPlanCache, replayState } from './replay.js';
 import { makeStudioEnv } from './materials.js';
-import { initSound, unlockAudio, knock } from './sound.js';
+import { initSound, unlockAudio, knock, applause } from './sound.js';
 import { makeBallMesh } from './balls3d.js';
 import { buildTable, kickNet, updateNets, NET_DEPTH } from './table3d.js';
 import { createPreview } from './preview3d.js';
@@ -591,7 +591,11 @@ function updateBroadcast(shooter, scoresBefore, outcome) {
   if (game.frame.frameOver && typeof game.frame.winner === 'number') {
     bcast.pending = { text: `${playerLabel(game.frame.winner).toUpperCase()} WINS THE FRAME`, tier: 'gold' };
   }
+  // crowd reaction, played when the shot settles: a full cheer for a milestone/frame-win banner, else
+  // polite→strong applause scaled by the points/pots just made; nothing for a miss or foul.
+  crowdReaction = bcast.pending ? 1 : gain > 0 ? Math.min(0.75, 0.3 + gain * 0.06) : 0;
 }
+let crowdReaction = 0; // 0..1 pending crowd applause level (set by updateBroadcast, played on settle)
 
 // Commentary for the status line: relabel players for AI-vs-AI and append the running break.
 function commentary(outcome) {
@@ -1086,6 +1090,7 @@ function onReplayEnd() {
   syncBallMeshes(game.pieces); // authoritative resting positions from the rules reconciliation
   updateScore();
   flushBanner(); // century / frame-won banner, held until the shot has settled
+  if (crowdReaction > 0) { applause(crowdReaction); crowdReaction = 0; } // the crowd reacts to the shot
   if (sharedReplay) { // watching a shared frame back → chain the next recorded shot
     sharedReplay.i += 1;
     if (!game.frame.frameOver && sharedReplay.i < sharedReplay.shots.length) {
@@ -1639,7 +1644,7 @@ function onTrickShotEnd() {
   const passed = res && trick.level.goal(res);
   trick.passed = passed;
   const r = el('trick-result');
-  if (passed) { r.textContent = '✓ Shot made!'; r.style.color = '#54c98a'; el('trick-next').disabled = false; status.textContent = 'Nice! Next ▶ for the next level.'; }
+  if (passed) { r.textContent = '✓ Shot made!'; r.style.color = '#54c98a'; el('trick-next').disabled = false; status.textContent = 'Nice! Next ▶ for the next level.'; applause(0.85); }
   else { r.textContent = '✗ Not this time — ↺ Retry.'; r.style.color = '#e08a6a'; status.textContent = 'Missed the goal. Retry, or Show me the solution.'; }
 }
 

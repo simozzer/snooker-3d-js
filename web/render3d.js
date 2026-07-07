@@ -1883,11 +1883,16 @@ function frame(now) {
         if (fin && fin.pocketed && !fin.cleared) { // a genuine drop (not a rattle/rebound) → swing the net
           const b = s.balls.find((x) => x.id === s.hit.id);
           if (b) kickNet(pocketNets, b.pos.x, b.pos.y, b.vel.x, b.vel.y, Math.hypot(b.vel.x, b.vel.y));
-          // the crowd cheers the MOMENT a scoring ball drops (once per shot), in sync with the pot —
-          // not after the settle/replay. crowdReaction>0 already means the shot scored.
+          // the crowd cheers the MOMENT a scoring ball drops (once per shot). crowdReaction>0 already
+          // means the shot scored. But when a cinematic pot REPLAY follows (human/trick shots), the
+          // player watches THAT drop — so cheer on the replay's pot, not the quick live pass, or it
+          // fires early and the replay plays silent. AI shots (no replay) cheer on the live drop.
           if (s.hit.id !== 'cue' && crowdReaction > 0 && !applauseFired) {
-            applause(crowdReaction, collisionIntervals(timeline));
-            applauseFired = true; applauseStartMs = now;
+            const willReplay = replaysOn() && lastPots.length && (trick || !shotIsAi);
+            if (replaying || !willReplay) {
+              applause(crowdReaction, collisionIntervals(timeline));
+              applauseFired = true; applauseStartMs = now;
+            }
           }
         }
       }

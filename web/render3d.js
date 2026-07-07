@@ -614,6 +614,7 @@ let crowdReaction = 0; // 0..1 pending crowd applause level (set by updateBroadc
 // Build the referee's spoken line for a shot (snooker-family only): fouls (+ points), miss, free ball,
 // the re-spotted black, break milestones, and the frame result. Spoken when the shot settles.
 let refSay = '';
+let refTimer = 0; // pending (delayed) referee announcement, so it lands after the crowd quietens
 let refRespotSpoken = false; // the re-spotted-black call fires once per frame
 function refereeLine(shooter, scoresBefore, outcome, freshBanner) {
   if (!game.frame || !('onColour' in game.frame)) return ''; // snooker & double-snooker only
@@ -743,7 +744,7 @@ function newFrameGame() {
   pauseThen = null;
   aiLineup = null;
   recallCount = 0; lastOutcome = null; awaitingMiss = false; el('missprompt').classList.remove('show'); // clear any miss state
-  refRespotSpoken = false; refSay = ''; // reset the referee's per-frame call state
+  refRespotSpoken = false; refSay = ''; clearTimeout(refTimer); // reset the referee's per-frame call state
   clearShareContext(); // a fresh frame drops any shared/challenge context
   frameSeed = seedCounter++; // record the rack seed so this frame is shareable/reproducible
   frameShots = [];
@@ -1182,8 +1183,13 @@ function onReplayEnd() {
   syncBallMeshes(game.pieces); // authoritative resting positions from the rules reconciliation
   updateScore();
   flushBanner(); // century / frame-won banner, held until the shot has settled
-  if (crowdReaction > 0) { applause(crowdReaction, collisionIntervals(timeline)); crowdReaction = 0; } // crowd reacts, its pitch-wobble in time with the break
-  if (refSay) { announce(refSay); refSay = ''; } // the referee calls the shot (foul / break / result)
+  const cheer = crowdReaction;
+  if (cheer > 0) { applause(cheer, collisionIntervals(timeline)); crowdReaction = 0; } // crowd reacts, its pitch-wobble in time with the break
+  if (refSay) { // the referee holds the call until the crowd has died down (longer after a bigger cheer)
+    const say = refSay; refSay = '';
+    clearTimeout(refTimer);
+    refTimer = setTimeout(() => announce(say), cheer > 0 ? (0.9 + cheer * 1.8) * 1000 : 250);
+  }
   if (sharedReplay) { // watching a shared frame back → chain the next recorded shot
     sharedReplay.i += 1;
     if (!game.frame.frameOver && sharedReplay.i < sharedReplay.shots.length) {

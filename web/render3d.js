@@ -603,13 +603,20 @@ function updateBroadcast(shooter, scoresBefore, outcome) {
   // crowd reaction, played when the shot settles: a FULL, long cheer for a milestone / frame win, else
   // a cheer whose length + intensity track how HARD the pot was (thin/long/banked/plant → bigger),
   // with a small nudge for a high-value pot; nothing for a miss or foul.
-  const diff = gain > 0 ? estimateShotDifficulty(timeline, lastPots) : 0;
-  crowdReaction = bcast.pending ? 1
+  // NEVER cheer a foul — even one that happens to pot a ball (a pool cue-scratch that still sinks an
+  // object ball has gain>0 via lastPots) or one that ends the frame. Legal pots / milestones / a clean
+  // frame win still cheer.
+  const foul = !!(outcome && outcome.foul);
+  const diff = (gain > 0 && !foul) ? estimateShotDifficulty(timeline, lastPots) : 0;
+  crowdReaction = foul ? 0
+    : bcast.pending ? 1
     : gain > 0 ? Math.max(0.18, Math.min(0.92, 0.15 + 0.78 * diff + 0.015 * (gain - 1)))
     : 0;
   refSay = refereeLine(shooter, scoresBefore, outcome, bcast.pending !== pendingBefore); // spoken on settle
 }
-let crowdReaction = 0; // 0..1 pending crowd applause level (set by updateBroadcast, played on settle)
+let crowdReaction = 0; // 0..1 pending crowd applause level (set by updateBroadcast, played at the pot)
+let applauseFired = false; // has this shot's cheer already started? (fires once, at the drop)
+let applauseStartMs = 0; // when the cheer started, so the referee can wait for it to die down
 
 // Build the referee's spoken line for a shot (snooker-family only): fouls (+ points), miss, free ball,
 // the re-spotted black, break milestones, and the frame result. Spoken when the shot settles.
@@ -777,6 +784,7 @@ function playShot(shot) {
   endT = timeline.length ? timeline[timeline.length - 1].t : 0;
   lastAngle = shot.angle;
   lastOutcome = res.outcome; lastPreShot = res.preShot; lastShooter = shooter; // for the miss rule (recall)
+  applauseFired = false; // arm the crowd cheer for this shot's first scoring drop
   lastPots = pottedObjectBalls(timeline); // object balls dropped this shot → worth a replay
   updateBroadcast(shooter, scoresBefore, res.outcome); // fold into the running break (banner flushes on settle)
   status.textContent = commentary(res.outcome);
@@ -1184,12 +1192,16 @@ function onReplayEnd() {
   updateScore();
   flushBanner(); // century / frame-won banner, held until the shot has settled
   const cheer = crowdReaction;
-  if (cheer > 0) { applause(cheer, collisionIntervals(timeline)); crowdReaction = 0; } // crowd reacts, its pitch-wobble in time with the break
-  if (refSay) { // the referee holds the call until the crowd has died down (longer after a bigger cheer)
+  // The cheer normally starts at the pot (in the render loop). Fallback here for a scoring shot whose
+  // drop was never played (e.g. the replay was skipped before the pocket event).
+  if (cheer > 0 && !applauseFired) { applause(cheer, collisionIntervals(timeline)); applauseFired = true; applauseStartMs = performance.now(); }
+  if (refSay) { // the referee holds the call until the crowd (which started at the pot) has died down
     const say = refSay; refSay = '';
+    const quietAt = applauseStartMs + (0.9 + cheer * 1.8) * 1000; // when the cheer has faded
     clearTimeout(refTimer);
-    refTimer = setTimeout(() => announce(say), cheer > 0 ? (0.9 + cheer * 1.8) * 1000 : 250);
+    refTimer = setTimeout(() => announce(say), cheer > 0 ? Math.max(250, quietAt - performance.now()) : 250);
   }
+  crowdReaction = 0;
   if (sharedReplay) { // watching a shared frame back → chain the next recorded shot
     sharedReplay.i += 1;
     if (!game.frame.frameOver && sharedReplay.i < sharedReplay.shots.length) {
@@ -1871,6 +1883,12 @@ function frame(now) {
         if (fin && fin.pocketed && !fin.cleared) { // a genuine drop (not a rattle/rebound) → swing the net
           const b = s.balls.find((x) => x.id === s.hit.id);
           if (b) kickNet(pocketNets, b.pos.x, b.pos.y, b.vel.x, b.vel.y, Math.hypot(b.vel.x, b.vel.y));
+          // the crowd cheers the MOMENT a scoring ball drops (once per shot), in sync with the pot —
+          // not after the settle/replay. crowdReaction>0 already means the shot scored.
+          if (s.hit.id !== 'cue' && crowdReaction > 0 && !applauseFired) {
+            applause(crowdReaction, collisionIntervals(timeline));
+            applauseFired = true; applauseStartMs = now;
+          }
         }
       }
     }

@@ -1659,12 +1659,18 @@ function syncTrickRails(level) {
     const [lo, hi] = r.span;
     const len = (hi - lo) * S;
     const mid = ((lo + hi) / 2) * S;
+    // The physics models the cue as a thin CONTACT LINE at r.perp — a ball banks when its EDGE reaches
+    // that line (its centre stays R away). So the stick must be drawn THIN and LOW: a fat stick centred
+    // on the line gets sunk half-into by every bank (reads as passing through), and a ball can only
+    // approach from either face, so we can't safely offset it. A slim cue resting on the cloth keeps the
+    // overlap sub-visible while the bank still lands right at the cue.
+    const shaftR = 0.006; // slim shaft — the ball's edge reaches ≈ its surface, so no visible clip-through
     const shaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.008 * S, 0.013 * S, len, 14),
+      new THREE.CylinderGeometry(shaftR * 0.8 * S, shaftR * S, len, 12),
       new THREE.MeshStandardMaterial({ color: 0xcaa062, roughness: 0.5 }),
     );
     shaft.castShadow = true;
-    const y = R * S * 0.9;
+    const y = shaftR * S; // rest on the cloth
     if (r.axis === 'x') { shaft.rotation.z = Math.PI / 2; shaft.position.set(mid, y, r.perp * S); }
     else { shaft.rotation.x = Math.PI / 2; shaft.position.set(r.perp * S, y, mid); }
     trickRailGroup.add(shaft);

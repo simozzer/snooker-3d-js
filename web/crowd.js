@@ -46,9 +46,16 @@ export function buildCrowd(ex, ez) {
   const heads = new THREE.InstancedMesh(headGeo, new THREE.MeshBasicMaterial(), N);
   // a pair of pale eyes per spectator (2 instances each) — repositioned every frame onto the side of
   // the head facing the ball, so the whole crowd's gaze tracks the action. A few look elsewhere.
-  const eyeGeo = new THREE.SphereGeometry(0.26, 6, 5);
+  // Low-poly eyeball + pupil: the crowd is tiny/background and there are N*2 of each, so keep the total
+  // geometry ≈ what a single eye mesh cost before adding pupils (the software test renderer is sensitive).
+  const eyeGeo = new THREE.SphereGeometry(0.26, 5, 3);
   const eyes = new THREE.InstancedMesh(eyeGeo, new THREE.MeshBasicMaterial({ color: 0xbfc2b8 }), N * 2);
   eyes.frustumCulled = false;
+  // a dark pupil on the front of each eye (toward the ball) so the gaze reads as looking AT the action;
+  // both eyes + pupils flatten for a beat when a spectator blinks (see update)
+  const pupilGeo = new THREE.SphereGeometry(0.14, 4, 2);
+  const pupils = new THREE.InstancedMesh(pupilGeo, new THREE.MeshBasicMaterial({ color: 0x0a0c10 }), N * 2);
+  pupils.frustumCulled = false;
   const spec = new Array(N); // { x,y,z head-centre; gaze:null=follow the ball | {dx,dy,dz}=a fixed distracted look }
 
   // muted Lowry palette, kept deliberately dark so the crowd stays a faint suggestion against the black
@@ -86,13 +93,13 @@ export function buildCrowd(ex, ez) {
     } else if (rnd < 0.19) {
       roll = { period: 5 + Math.random() * 5, phase: Math.random() * 10, dur: 0.6 + Math.random() * 0.3, dir: Math.random() < 0.5 ? 1 : -1 };
     }
-    spec[i] = { x, y: hy, z, gaze, roll };
+    spec[i] = { x, y: hy, z, gaze, roll, blink: { period: 2.6 + Math.random() * 3.6, phase: Math.random() * 10 } };
   }
   bodies.instanceMatrix.needsUpdate = true;
   heads.instanceMatrix.needsUpdate = true;
   bodies.instanceColor.needsUpdate = true;
   heads.instanceColor.needsUpdate = true;
-  g.add(bodies, heads, eyes);
+  g.add(bodies, heads, eyes, pupils);
 
   // static, non-interactive, unshadowed background
   g.traverse((o) => { o.castShadow = false; o.receiveShadow = false; o.raycast = () => {}; });
@@ -101,8 +108,9 @@ export function buildCrowd(ex, ez) {
 
   // Repoint every spectator's eyes onto the head-side facing (tx,ty,tz) — the live ball. Distracted
   // people keep their fixed gaze. Skips the work when the ball hasn't moved (idle turns cost nothing).
-  const EYE_SEP = 0.30, EYE_FWD = HEADR * 0.86, EYE_UP = HEADR * 0.1;
+  const EYE_SEP = 0.30, EYE_FWD = HEADR * 0.86, EYE_UP = HEADR * 0.1, PUPIL_FWD = 0.17, BLINK_DUR = 0.11;
   const em = new THREE.Matrix4();
+  const ep = new THREE.Vector3(), es = new THREE.Vector3();
   function update(tx, ty, tz, now) {
     const t = now / 1000;
     for (let i = 0; i < N; i++) {
@@ -116,11 +124,20 @@ export function buildCrowd(ex, ez) {
       } else if (sp.gaze) { dx = sp.gaze.dx; dy = sp.gaze.dy; dz = sp.gaze.dz; }
       else { dx = tx - sp.x; dy = ty - sp.y; dz = tz - sp.z; const L = Math.hypot(dx, dy, dz) || 1; dx /= L; dy /= L; dz /= L; }
       let rx = dz, rz = -dx; const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl; // horizontal right = up × dir
-      const ex = sp.x + dx * EYE_FWD, ey = sp.y + dy * EYE_FWD + EYE_UP, ez = sp.z + dz * EYE_FWD;
-      em.makeTranslation(ex + rx * EYE_SEP, ey, ez + rz * EYE_SEP); eyes.setMatrixAt(2 * i, em);
-      em.makeTranslation(ex - rx * EYE_SEP, ey, ez - rz * EYE_SEP); eyes.setMatrixAt(2 * i + 1, em);
+      const cx = sp.x + dx * EYE_FWD, cy = sp.y + dy * EYE_FWD + EYE_UP, cz = sp.z + dz * EYE_FWD;
+      // blink: flatten the eyes (and their pupils) to a slit for a beat, on this spectator's own cadence
+      const bp = (t + sp.blink.phase) % sp.blink.period;
+      es.set(1, bp < BLINK_DUR ? 0.1 : 1, 1);
+      for (let k = 0; k < 2; k++) {
+        const sgn = k === 0 ? 1 : -1;
+        const idx = 2 * i + k;
+        const px = cx + rx * EYE_SEP * sgn, pz = cz + rz * EYE_SEP * sgn;
+        ep.set(px, cy, pz); em.compose(ep, q, es); eyes.setMatrixAt(idx, em); // eyeball
+        ep.set(px + dx * PUPIL_FWD, cy + dy * PUPIL_FWD, pz + dz * PUPIL_FWD); em.compose(ep, q, es); pupils.setMatrixAt(idx, em); // pupil on the front
+      }
     }
     eyes.instanceMatrix.needsUpdate = true;
+    pupils.instanceMatrix.needsUpdate = true;
   }
   update(0, 0, 0, 0); // initial gaze toward the table centre
   return { group: g, update };

@@ -47,6 +47,20 @@ export function makeBallMesh(piece, variant, R, S) {
   grp.add(spinner);
   const isCue = piece.group === 'cue' || piece.id === 'cue';
   const col = ballColor(piece, variant);
+  // Carrom: pieces are flat DISCS resting on the board, not balls. Build a short cylinder lowered so it
+  // sits on the bed (the group is positioned at ball-centre height R), with a slim darker rim on top.
+  if (variant.discPieces) {
+    const T = R * S * 0.44; // disc thickness
+    const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.4 });
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(R * S, R * S, T, 24), mat);
+    disc.position.y = T / 2 - R * S; // rest the disc's underside on the bed
+    disc.castShadow = true; disc.receiveShadow = true;
+    grp.add(disc);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(R * S * 0.82, R * S * 0.09, 8, 20), new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.6, transparent: true, opacity: 0.25 }));
+    rim.rotation.x = Math.PI / 2; rim.position.y = T - R * S + 0.001; // a faint inlaid ring on the top face
+    grp.add(rim);
+    return { grp, spinner, spot: null };
+  }
   const stripe = variant.isStripe ? variant.isStripe(piece) : false;
   const base = stripe ? new THREE.Color(CUE_FALLBACK) : col; // a stripe = white ball + a coloured band
   const sphere = new THREE.Mesh(new THREE.SphereGeometry(R * S, 28, 20), new THREE.MeshStandardMaterial({ color: base, roughness: 0.18 }));

@@ -15,10 +15,11 @@ import { newGame, takeShot } from './game.js';
 import { snooker } from './variants/snooker.js';
 import { pool } from './variants/pool.js';
 import { nineball } from './variants/nineball.js';
+import { carrom } from './variants/carrom.js';
 import { MAX_SPEED } from './snooker.js';
 
 export const SHARE_VERSION = 1;
-const VARIANTS = [snooker, pool, nineball]; // index = variantId (stable — append only)
+const VARIANTS = [snooker, pool, nineball, carrom]; // index = variantId (stable — append only)
 export const variantId = (v) => Math.max(0, VARIANTS.indexOf(v));
 export const variantById = (id) => VARIANTS[id] ?? snooker;
 

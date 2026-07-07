@@ -13,8 +13,9 @@ import { doubleSnooker } from '../src/variants/doublesnooker.js';
 import { pool } from '../src/variants/pool.js';
 import { nineball } from '../src/variants/nineball.js';
 import { billiards } from '../src/variants/billiards.js';
+import { carrom } from '../src/variants/carrom.js';
 
-const VARIANTS = { snooker, doublesnooker: doubleSnooker, pool, nineball, billiards };
+const VARIANTS = { snooker, doublesnooker: doubleSnooker, pool, nineball, billiards, carrom };
 
 self.onmessage = (e) => {
   const { variantName, frame, pieces, config, reqId } = e.data;

@@ -9,8 +9,9 @@ import { pool } from '../src/variants/pool.js';
 import { nineball } from '../src/variants/nineball.js';
 import { billiards } from '../src/variants/billiards.js';
 import { doubleSnooker } from '../src/variants/doublesnooker.js';
+import { carrom } from '../src/variants/carrom.js';
 
-const VARIANTS = [snooker, pool, nineball, billiards, doubleSnooker];
+const VARIANTS = [snooker, pool, nineball, billiards, doubleSnooker, carrom];
 
 for (const v of VARIANTS) {
   test(`${v.name}: exposes the full variant interface`, () => {

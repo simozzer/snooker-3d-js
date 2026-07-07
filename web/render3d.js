@@ -18,6 +18,7 @@ import { simulate } from '../src/simulate.js';
 import { snooker } from '../src/variants/snooker.js';
 import { pool } from '../src/variants/pool.js';
 import { nineball } from '../src/variants/nineball.js';
+import { carrom } from '../src/variants/carrom.js';
 import { aiTurn, chooseShotFinish, difficultyConfig, executeShot, shouldRecallMiss } from '../src/ai.js';
 import { build147 } from '../src/exhibition.js';
 import { getLevel, runTrickShot, findSolution, CURATED_COUNT } from '../src/trickshots.js';
@@ -36,7 +37,7 @@ import { encodeFrame, decodeFrame, verifyFrame, variantId as shareVariantId, var
 // from the selected variant. This file only draws — the physics/rules/AI are the headless engine the
 // tests drive. railCylinders/pocketJaws are geometry builders that take (R, bounds, pockets), so the
 // same code renders a snooker table or a (smaller) pool table just from the variant's own dimensions.
-const VARIANTS = { snooker, pool, nineball };
+const VARIANTS = { snooker, pool, nineball, carrom };
 let variant = snooker;
 const S = 10; // scene scale (physics metres → scene units)
 let R;

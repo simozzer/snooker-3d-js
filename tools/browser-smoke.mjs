@@ -112,12 +112,12 @@ after(async () => {
 
 const guard = (t) => { if (!available) { t.skip(`browser env unavailable — ${skipReason}`); return true; } return false; };
 
-test('the app loads: canvas renders and all four game modes are offered', async (t) => {
+test('the app loads: canvas renders and all game modes are offered', async (t) => {
   if (guard(t)) return;
   assert.equal(await evaluate(`!!document.querySelector('#view canvas')`), true);
   assert.match(await evaluate(`document.title`), /snooker/i);
   const modes = await evaluate(`[...document.getElementById('game').options].map(o=>o.value)`);
-  assert.deepEqual(modes.sort(), ['nineball', 'pool', 'snooker', 'trickshots'].sort());
+  assert.deepEqual(modes.sort(), ['carrom', 'nineball', 'pool', 'snooker', 'trickshots'].sort());
   assert.match(await evaluate(`document.getElementById('version').textContent`), /^v\d/);
 });
 

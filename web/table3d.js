@@ -30,21 +30,20 @@ function buildNet(mouthR, { S }) {
 // arcing into the table around each pocket centre by its mouth radius; every arc bulges inward.
 function bedShape({ variant, S, HX, HY }) {
   const pk = variant.pockets();
-  const rAt = (x, y) => { const p = pk.find((q) => Math.abs(q.center.x - x) < 1e-6 && Math.abs(q.center.y - y) < 1e-6); return (p.mouth ?? p.radius) * S; };
+  // 0 for an absent pocket (e.g. a carrom board has no middle pockets) → that edge stays a straight line.
+  const rAt = (x, y) => { const p = pk.find((q) => Math.abs(q.center.x - x) < 1e-6 && Math.abs(q.center.y - y) < 1e-6); return p ? (p.mouth ?? p.radius) * S : 0; };
   const [cbl, cbr, ctr, ctl, mb, mt] = [rAt(-HX, -HY), rAt(HX, -HY), rAt(HX, HY), rAt(-HX, HY), rAt(0, -HY), rAt(0, HY)];
   const x = HX * S;
   const y = HY * S;
   const P = Math.PI;
   const sh = new THREE.Shape();
   sh.moveTo(-x + cbl, -y);
-  sh.lineTo(-mb, -y);
-  sh.absarc(0, -y, mb, P, 0, true); // bottom-middle
+  if (mb > 0) { sh.lineTo(-mb, -y); sh.absarc(0, -y, mb, P, 0, true); } // bottom-middle (skipped if none)
   sh.lineTo(x - cbr, -y);
   sh.absarc(x, -y, cbr, P, P / 2, true); // bottom-right corner
   sh.lineTo(x, y - ctr);
   sh.absarc(x, y, ctr, (3 * P) / 2, P, true); // top-right corner
-  sh.lineTo(mt, y);
-  sh.absarc(0, y, mt, 0, -P, true); // top-middle
+  if (mt > 0) { sh.lineTo(mt, y); sh.absarc(0, y, mt, 0, -P, true); } // top-middle (skipped if none)
   sh.lineTo(-x + ctl, y);
   sh.absarc(-x, y, ctl, 0, -P / 2, true); // top-left corner
   sh.lineTo(-x, -y + cbl);

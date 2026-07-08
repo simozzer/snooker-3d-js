@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Board games</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: #12161b; color: #e8e8e8; }
+      #app { display: flex; height: 100vh; height: 100dvh; }
+      #view { flex: 1; position: relative; min-width: 0; display: grid; place-items: center; padding: 16px; }
+      #board { display: block; touch-action: none; border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+      #panel { width: 288px; padding: 16px; background: #1b2229; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+      a.back { font-size: 12px; color: #7fb0d8; text-decoration: none; }
+      a.back:hover { text-decoration: underline; }
+      h1 { font-size: 16px; margin: 2px 0 0; color: #cfe0ee; letter-spacing: 0.5px; }
+      .hint { font-size: 11px; color: #6f8496; line-height: 1.4; }
+      .ctl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+      .ctl > label { color: #a8b6c4; }
+      select { min-height: 34px; font-size: 14px; padding: 0 8px; border-radius: 8px; background: #222b34; color: #e8e8e8; border: 1px solid #3a4753; }
+      button { padding: 9px 12px; font-size: 14px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; background: #2e7d5b; color: #fff; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button.sec { background: #33404c; }
+      #gamecontrols { display: flex; flex-direction: column; gap: 8px; }
+      #gamecontrols:empty { display: none; }
+      #turn { display: none; padding: 9px 12px; border-radius: 8px; background: linear-gradient(90deg,#1f7a4d,#26935d);
+        color: #eafff3; font-weight: 800; font-size: 13.5px; letter-spacing: .3px; }
+      #turn.show { display: block; }
+      #result { display: none; padding: 10px 12px; border-radius: 8px; text-align: center; font-weight: 900; letter-spacing: 1px;
+        font-size: 16px; background: rgba(255,210,80,0.12); color: #ffdf6b; border: 1px solid rgba(255,210,80,.5); }
+      #result.show { display: block; }
+      #status { font-size: 12px; color: #8fa3b5; min-height: 30px; line-height: 1.4; }
+      details#rules { border: 1px solid #33404c; border-radius: 8px; background: #151b21; }
+      details#rules > summary { list-style: none; cursor: pointer; padding: 9px 12px; font-size: 13px; font-weight: 600; color: #cfe0ee; }
+      details#rules > summary::-webkit-details-marker { display: none; }
+      details#rules > summary::before { content: '▸ '; color: #7f93a5; }
+      details#rules[open] > summary::before { content: '▾ '; }
+      details#rules .rbody { padding: 0 12px 12px; font-size: 12px; color: #a8b6c4; line-height: 1.5; }
+      details#rules .rbody h4 { margin: 10px 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: #7f93a5; }
+      details#rules .rbody ul { margin: 0; padding-left: 16px; }
+      #err { max-width: 420px; text-align: center; line-height: 1.5; }
+      #err a { color: #54c98a; }
+
+      @media (pointer: coarse) {
+        button { padding: 13px 14px; font-size: 15px; border-radius: 10px; }
+        select { min-height: 46px; font-size: 15px; }
+      }
+      @media (max-width: 760px) {
+        #app { flex-direction: column; }
+        #view { flex: none; height: 56dvh; width: 100%; padding: 10px; }
+        #panel { width: 100%; flex: 1; min-height: 0; padding: 12px 14px 24px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="view">
+        <canvas id="board" width="480" height="480"></canvas>
+        <div id="err" style="display:none;"></div>
+      </div>
+      <div id="panel">
+        <a class="back" href="../index.html">← All games</a>
+        <h1 id="gametitle">Board game</h1>
+        <div id="result"></div>
+        <div id="turn"></div>
+        <div class="ctl"><label>Opponent</label>
+          <select id="mode">
+            <option value="ai" selected>You vs AI</option>
+            <option value="human">Two players (hot-seat)</option>
+          </select>
+        </div>
+        <div class="ctl" id="row-difficulty"><label>AI difficulty</label>
+          <select id="difficulty">
+            <option value="easy">Easy</option>
+            <option value="medium" selected>Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </div>
+        <div id="gamecontrols"></div>
+        <button id="newgame">New game</button>
+        <button id="undo" class="sec">↶ Undo</button>
+        <button id="sharelink" class="sec">🔗 Copy share link</button>
+        <div id="status"></div>
+        <details id="rules"><summary>How to play &amp; rules</summary><div class="rbody" id="rules-body"></div></details>
+      </div>
+    </div>
+    <script type="module" src="./board.js"></script>
+  </body>
+</html>

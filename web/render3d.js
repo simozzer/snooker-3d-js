@@ -1969,6 +1969,7 @@ requestAnimationFrame(frame);
   const q = params.get('tricky');
   const frameToken = params.get('frame');
   const challengeToken = params.get('challenge');
+  const game = params.get('game'); // ?game=<id> — deep-link from the compendium hub into a cue variant
   if (challengeToken) {
     try { startChallenge(challengeToken); } catch { status.textContent = 'That challenge link couldn’t be read.'; }
   } else if (frameToken) {
@@ -1977,5 +1978,9 @@ requestAnimationFrame(frame);
     const idx = q === 'true' ? TRICK_LEVELS.leapfrog : (TRICK_LEVELS[q] ?? (Number.isInteger(+q) ? +q : TRICK_LEVELS.leapfrog));
     el('game').value = 'trickshots';
     startTrickShots(idx);
+  } else if (game && [...el('game').options].some((o) => o.value === game)) {
+    // select the requested variant and run its change handler (which sets the variant / starts a frame)
+    el('game').value = game;
+    el('game').dispatchEvent(new Event('change'));
   }
 }

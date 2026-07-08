@@ -3,16 +3,93 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>snooker-js — 3D</title>
-    <!-- GitHub Pages entry point: send visitors straight to the 3D app. The relative URL resolves under
-         the project's Pages base path (…/snooker-3d-js/web/render3d.html). -->
-    <meta http-equiv="refresh" content="0; url=web/render3d.html" />
+    <title>Games compendium</title>
+    <meta name="description" content="A compendium of games — cue-physics classics plus chess, draughts and backgammon." />
     <style>
-      body { margin: 0; font-family: system-ui, sans-serif; background: #12161b; color: #e8e8e8; display: grid; place-items: center; height: 100vh; }
-      a { color: #54c98a; }
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; font-family: system-ui, sans-serif; background: #12161b; color: #e8e8e8;
+        display: flex; flex-direction: column; align-items: center; padding: 40px 20px 60px; }
+      /* soft animated aurora, borrowed from the 2D build — cheap GPU transforms only */
+      .bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: #12161b; pointer-events: none; }
+      .bg span { position: absolute; width: 62vmax; height: 62vmax; border-radius: 50%; will-change: transform; }
+      .b1 { background: radial-gradient(circle,rgba(46,139,87,.38),rgba(46,139,87,0) 70%); top: -20%; left: -14%; animation: d1 32s ease-in-out infinite; }
+      .b2 { background: radial-gradient(circle,rgba(14,116,144,.36),rgba(14,116,144,0) 70%); top: 24%; left: 50%; animation: d2 38s ease-in-out infinite; }
+      .b3 { background: radial-gradient(circle,rgba(200,146,58,.28),rgba(200,146,58,0) 70%); top: 54%; left: -4%; animation: d3 44s ease-in-out infinite; }
+      @keyframes d1 { 50% { transform: translate(28vw,20vh) scale(1.2); } }
+      @keyframes d2 { 50% { transform: translate(-24vw,16vh) scale(.9); } }
+      @keyframes d3 { 50% { transform: translate(20vw,-18vh) scale(1.15); } }
+      @media (prefers-reduced-motion: reduce) { .bg span { animation: none; } }
+
+      header { text-align: center; margin-bottom: 30px; }
+      h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: 0.5px; }
+      h1 .dot { color: #54c98a; }
+      .tag { font-size: 14px; color: #9fb4c7; margin: 0; }
+
+      main { width: 100%; max-width: 940px; }
+      .section-label { font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; color: #7f93a5; margin: 26px 4px 12px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+      a.card { text-decoration: none; color: inherit; background: #1b2229; border: 1px solid #2a333d; border-radius: 14px;
+        padding: 18px; display: flex; flex-direction: column; gap: 8px; transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease; }
+      a.card:hover { transform: translateY(-3px); border-color: #3f5568; box-shadow: 0 12px 28px rgba(0,0,0,.45); }
+      a.card:focus-visible { outline: 2px solid #54c98a; outline-offset: 2px; }
+      .icon { font-size: 34px; line-height: 1; }
+      .name { font-size: 17px; font-weight: 700; }
+      .desc { font-size: 12.5px; color: #93a4b4; line-height: 1.4; }
+      .pill { align-self: flex-start; margin-top: 2px; font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase;
+        color: #cfe0ee; background: #2a333d; border-radius: 999px; padding: 3px 9px; }
+      .pill.board { color: #ffdf6b; background: rgba(255,210,80,.1); }
+      footer { margin-top: 40px; font-size: 12px; color: #6f8496; text-align: center; }
+      footer a { color: #7fb0d8; }
     </style>
   </head>
   <body>
-    <p>Loading the 3D table… if it doesn't open, <a href="web/render3d.html">click here to play</a>.</p>
+    <div class="bg" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+    <header>
+      <h1>Games <span class="dot">·</span> Compendium</h1>
+      <p class="tag">A table full of games. Pick one — each has its own link.</p>
+    </header>
+    <main>
+      <div class="section-label">Cue &amp; table — real physics in 3D</div>
+      <div class="grid">
+        <a class="card" href="web/render3d.html?game=snooker">
+          <span class="icon">🎱</span><span class="name">Snooker</span>
+          <span class="desc">Full-size table, breaks &amp; fouls, referee voice.</span><span class="pill">3D physics</span>
+        </a>
+        <a class="card" href="web/render3d.html?game=pool">
+          <span class="icon">🎱</span><span class="name">8-Ball Pool</span>
+          <span class="desc">Stripes vs solids, sink the 8 to win.</span><span class="pill">3D physics</span>
+        </a>
+        <a class="card" href="web/render3d.html?game=nineball">
+          <span class="icon">🎱</span><span class="name">9-Ball Pool</span>
+          <span class="desc">Rotation pool — lowest ball first, race to the 9.</span><span class="pill">3D physics</span>
+        </a>
+        <a class="card" href="web/render3d.html?game=carrom">
+          <span class="icon">⚪</span><span class="name">Carrom</span>
+          <span class="desc">Flick the striker, pocket your coins &amp; the queen.</span><span class="pill">3D physics</span>
+        </a>
+        <a class="card" href="web/render3d.html?tricky=true">
+          <span class="icon">🎯</span><span class="name">Trick Shots</span>
+          <span class="desc">Curated puzzles — solve or watch the solution.</span><span class="pill">3D physics</span>
+        </a>
+      </div>
+
+      <div class="section-label">Board &amp; dice — no physics, just wits</div>
+      <div class="grid">
+        <a class="card" href="web/board.html?game=chess">
+          <span class="icon">♞</span><span class="name">Chess</span>
+          <span class="desc">Full legal rules vs a thinking AI, or pass-and-play.</span><span class="pill board">Board</span>
+        </a>
+        <a class="card" href="web/board.html?game=draughts">
+          <span class="icon">⛀</span><span class="name">Draughts</span>
+          <span class="desc">English checkers — forced captures, kings, multi-jumps.</span><span class="pill board">Board</span>
+        </a>
+        <a class="card" href="web/board.html?game=backgammon">
+          <span class="icon">🎲</span><span class="name">Backgammon</span>
+          <span class="desc">Roll, hit the blots, bear off to win.</span><span class="pill board">Board</span>
+        </a>
+      </div>
+    </main>
+    <footer>Deterministic engines, no network needed. <a href="web/render3d.html">Open the 3D table →</a></footer>
   </body>
 </html>

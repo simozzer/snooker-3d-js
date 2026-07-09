@@ -85,6 +85,10 @@
         <details id="rules"><summary>How to play &amp; rules</summary><div class="rbody" id="rules-body"></div></details>
       </div>
     </div>
+    <!-- three.js is vendored locally (web/vendor/three, r160); the Dice view renders in 3D. -->
+    <script type="importmap">
+      { "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
+    </script>
     <script type="module" src="./board.js"></script>
   </body>
 </html>

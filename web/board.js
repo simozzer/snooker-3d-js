@@ -42,6 +42,7 @@ const GAMES = {
   chess:      { title: 'Chess',      load: () => import('./games/chess-view.js') },
   draughts:   { title: 'Draughts',   load: () => import('./games/draughts-view.js') },
   backgammon: { title: 'Backgammon', load: () => import('./games/backgammon-view.js') },
+  dice:       { title: 'Dice',       load: () => import('./games/dice-view.js') },
 };
 
 const params = new URLSearchParams(location.search);

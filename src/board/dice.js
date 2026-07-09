@@ -1,7 +1,8 @@
-// dice.js — a DOM-free engine for DICE, the Farkle-style push-your-luck game this compendium's
-// original stand-alone version grew from. Six dice, roll and set aside the scoring ones, then decide
-// whether to bank what you've built up or risk it all on another roll. Roll nothing scoring and you
-// "farkle": the whole turn's points evaporate. First past the target wins.
+// dice.js — a DOM-free engine for DICE, the push-your-luck game this compendium's original stand-alone
+// version grew from. It's the "house rules" the project's author was taught (350 to get on the board,
+// a three-strike penalty) — Farkle-style, but not textbook Farkle. Six dice: roll and set aside the
+// scoring ones, then decide whether to bank what you've built up or risk it all on another roll. Roll
+// nothing scoring and you "farkle": the whole turn's points evaporate. First past the target wins.
 //
 // Like the other src/board engines this file is pure logic — no DOM, no canvas. The view
 // (web/games/dice-view.js) owns all drawing and input and drives this through the small API below.

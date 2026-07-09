@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { createDice, MIN_BANK, TARGET } from '../../src/board/dice.js';
 import { createDiceSim, FACES } from '../../src/board/dice-physics.js';
+import { decideRoll, AI_STYLE } from '../../src/board/dice-ai.js';
 import { makeStudioEnv, feltMaterial, woodMaterial } from '../materials.js';
 
 const GREEN = 0x54c98a;
@@ -167,7 +168,7 @@ export default function mount(ctx) {
     }).join('');
     let line;
     if (s.phase === 'over') line = winMsg(s.players[s.winner].name);
-    else if (busy && mode === 'ai' && s.current === 1) line = `Computer rolling…`;
+    else if (busy && mode === 'ai' && s.current === 1) line = `Computer (${AI_STYLE[difficulty].split(' — ')[0]}) rolling…`;
     else if (s.farkled) line = 'Farkle! No score — turn lost.';
     else if (s.phase === 'await-roll') line = `First to ${TARGET} · roll to start your turn`;
     else line = sel > 0 ? `Selected ${sel} · turn ${s.turnScore + sel}`
@@ -247,6 +248,25 @@ export default function mount(ctx) {
     return live.length ? live : [0, 1, 2, 3, 4, 5]; // empty ⇒ hot dice (fresh six)
   }
 
+  // Clear the felt for a fresh throw: park every previously selected/banked die onto the rail (off
+  // the table) and hide anything else, so only the dice about to be thrown remain in the tray.
+  function clearTableForThrow(thrown) {
+    let rc = 0;
+    const s = engine.state();
+    for (let i = 0; i < 6; i++) {
+      if (thrown.includes(i)) { diceMeshes[i].visible = true; setDim(diceMeshes[i], false); continue; }
+      const d = s.dice[i];
+      if (d.held || d.picked) {
+        diceMeshes[i].visible = true;
+        diceMeshes[i].position.copy(railPos(rc++));
+        diceMeshes[i].quaternion.copy(restQuatFor(d.value));
+        setDim(diceMeshes[i], true);
+      } else {
+        diceMeshes[i].visible = false;
+      }
+    }
+  }
+
   // Run the physics for the thrown dice and play it back, then commit the settled values to the
   // Farkle engine and call `onSettled`.
   function rollAndPlay(onSettled) {
@@ -254,8 +274,7 @@ export default function mount(ctx) {
     const thrown = thrownIndices();
     const result = createDiceSim({ count: thrown.length }).simulate((seedCounter = (seedCounter * 1664525 + 1013904223) >>> 0));
     busy = true; syncButtons(); renderHud();
-    // make thrown meshes visible; held stay on rail
-    for (const i of thrown) { diceMeshes[i].visible = true; setDim(diceMeshes[i], false); }
+    clearTableForThrow(thrown);
     playback = {
       thrown,
       frames: result.frames,
@@ -270,6 +289,7 @@ export default function mount(ctx) {
         onSettled(res);
       },
     };
+    applyFrame(0); // lift the thrown dice to their airborne start now, before the next paint
   }
 
   function stepPlayback() {
@@ -342,8 +362,8 @@ export default function mount(ctx) {
   }
 
   // ---- AI -----------------------------------------------------------------------------------
-  const FARKLE_P = { 6: 0.023, 5: 0.077, 4: 0.157, 3: 0.278, 2: 0.444, 1: 0.667 };
-
+  // The computer keeps every scoring die, then asks the shared gambling brain (src/board/dice-ai.js)
+  // whether to bank or roll on — an exact expected-value call tempered by the chosen difficulty.
   function maybeAI() {
     if (mode !== 'ai' || over) return;
     const s = engine.state();
@@ -363,27 +383,21 @@ export default function mount(ctx) {
 
   function aiDecide() {
     const st = engine.state();
-    const sel = engine.selectionScore();
-    const projected = st.turnScore + sel;
-    let remaining = st.dice.filter((d) => !d.held && !d.picked).length;
-    if (remaining === 0) remaining = 6;
-    const p = FARKLE_P[remaining] ?? 0.5;
-    const cap = { easy: 400, medium: 800, hard: 1400 }[difficulty] || 800;
-    const evGain = (1 - p) * expectedRollValue(remaining);
-    const evLoss = p * projected;
-    let press;
-    if (projected < MIN_BANK) press = true;
-    else if (projected >= cap) press = false;
-    else if (difficulty === 'easy') press = false;
-    else if (difficulty === 'hard') press = evGain > evLoss;
-    else press = remaining >= 2 && evGain > evLoss * 0.8;
+    const projected = st.turnScore + engine.selectionScore();
+    const remaining = st.dice.filter((d) => !d.held && !d.picked).length; // 0 ⇒ hot dice
+    const action = decideRoll({
+      turnScore: projected,
+      diceRemaining: remaining,
+      myScore: st.players[st.current].score,
+      oppScore: st.players[1 - st.current].score,
+      target: TARGET,
+      minBank: MIN_BANK,
+    }, difficulty);
 
     busy = true; syncButtons();
-    if (press) setTimeout(aiRoll, 500);
+    if (action === 'roll') setTimeout(aiRoll, 500);
     else { const won = engine.bank().won; if (won) finishGame(); else afterTurnChange(); }
   }
-
-  const expectedRollValue = (n) => ({ 6: 480, 5: 350, 4: 240, 3: 150, 2: 85, 1: 35 })[n] ?? 100;
 
   function selectAllScoring() {
     const s = engine.state();
@@ -460,6 +474,7 @@ export default function mount(ctx) {
       renderer.dispose();
     },
     rulesHtml: `
+      <p style="margin:0 0 6px;color:#8fa3b5">A push-your-luck dice game — the “Dice” house rules (Farkle-style).</p>
       <h4>Goal</h4>
       <ul><li>First player to <b>${TARGET}</b> points wins.</li></ul>
       <h4>Each turn</h4>
@@ -477,7 +492,13 @@ export default function mount(ctx) {
         <li>Each extra die of that face doubles the triple (4-of ×2, 5-of ×4, 6-of ×8).</li>
       </ul>
       <h4>Strikes</h4>
-      <ul><li>Three farkles in a row costs you 1000 points.</li></ul>`,
+      <ul><li>Three farkles in a row costs you 1000 points.</li></ul>
+      <h4>Computer players</h4>
+      <ul>
+        <li><b>Easy</b> — ${AI_STYLE.easy}.</li>
+        <li><b>Medium</b> — ${AI_STYLE.medium}.</li>
+        <li><b>Hard</b> — ${AI_STYLE.hard}.</li>
+      </ul>`,
   };
 
   canvas.addEventListener('pointerdown', onPointer);

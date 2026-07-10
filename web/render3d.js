@@ -148,6 +148,54 @@ const cueStick = new THREE.Group();
 cueStick.visible = false;
 scene.add(cueStick);
 
+// The flicking hand — carrom's striker is FLICKED with a finger, not cued. In place of the cue stick
+// we show a stylised hand behind the striker: a fist with one finger that cocks back and snaps forward
+// to the contact point. Local +Z runs knuckle→fingertip (toward the striker); we aim it like the cue.
+const FINGER_LEN = 0.085; // m
+const flickHand = new THREE.Group();
+const flickFinger = new THREE.Group(); // pivot at the knuckle so the finger can curl and snap
+{
+  const skin = new THREE.MeshStandardMaterial({ color: 0xc8a079, roughness: 0.78 });
+  // rounded fist (back of the hand) behind the knuckle — reads as a hand, not a box
+  const fist = new THREE.Mesh(new THREE.SphereGeometry(0.052 * S, 18, 14), skin);
+  fist.scale.set(1.15, 0.72, 1.3);
+  fist.position.set(0, 0.006 * S, -0.05 * S);
+  fist.castShadow = true;
+  // three curled knuckle-fingers tucked under the fist, so the pointing finger reads as one of a hand
+  for (const off of [-0.026, 0, 0.026]) {
+    const kn = new THREE.Mesh(new THREE.CylinderGeometry(0.008 * S, 0.008 * S, 0.03 * S, 8), skin);
+    kn.position.set(off * S, -0.006 * S, -0.008 * S); kn.rotation.x = Math.PI / 2; kn.castShadow = true;
+    flickHand.add(kn);
+  }
+  // the flicking finger: a tapered segment rooted at the knuckle, extended along +Z toward the striker
+  const finger = new THREE.Mesh(new THREE.CylinderGeometry(0.008 * S, 0.011 * S, FINGER_LEN * S, 10), skin);
+  finger.geometry.translate(0, (FINGER_LEN * S) / 2, 0); // base at the pivot, tip out along +Y…
+  finger.rotation.x = Math.PI / 2;                        // …then tipped so it points +Z (forward)
+  finger.castShadow = true;
+  flickFinger.add(finger);
+  flickFinger.position.set(0.026 * S, 0.004 * S, 0.01 * S);
+  // thumb, cocked to the side of the fist (static) so the flick pose reads at a glance
+  const thumb = new THREE.Mesh(new THREE.CylinderGeometry(0.008 * S, 0.011 * S, 0.05 * S, 8), skin);
+  thumb.position.set(-0.03 * S, 0.006 * S, -0.005 * S);
+  thumb.rotation.set(Math.PI / 2.2, 0, 0.6);
+  thumb.castShadow = true;
+  flickHand.add(fist, thumb, flickFinger);
+}
+flickHand.visible = false;
+scene.add(flickHand);
+
+const usingFlick = () => variant.id === 'carrom';
+// Place the flicking hand. `cock` 0 = finger extended (tip at the striker), 1 = fully drawn back.
+function placeFlickHand(cock) {
+  const dir = shotCam.aimW; // carrom is flat — the aim is horizontal
+  const knuckle = shotCam.tipContact.clone()
+    .addScaledVector(dir, -FINGER_LEN * S)     // knuckle sits a finger-length behind contact…
+    .addScaledVector(dir, -0.06 * S * cock);   // …easing the whole hand back as it winds up
+  flickHand.position.copy(knuckle);
+  flickHand.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+  flickFinger.rotation.x = -1.15 * cock;       // curl the finger up/back, snapping flat on release
+}
+
 function syncBallMeshes(pieces) {
   const ids = new Set(pieces.map((p) => p.id));
   for (const [id, m] of ballMeshes) if (!ids.has(id)) { scene.remove(m.grp); ballMeshes.delete(id); }
@@ -1010,13 +1058,20 @@ function beginShotCam(shot) {
   shotCam = {
     start: performance.now(), aimW, cueDir, tipContact: Cw.clone().addScaledVector(aimW, -R * S),
     cuePos, cueLook, watchPos, watchLook: new THREE.Vector3(0, 0, 0), // table centre → seamless controls handoff
-    camPos: cuePos.clone(), camTgt: cueLook.clone(), struck: false,
+    camPos: cuePos.clone(), camTgt: cueLook.clone(), struck: false, flick: usingFlick(),
   };
+  if (shotCam.flick) {
+    // Watch the flick from an elevated 3/4 view behind the striker — hand and striker low in frame,
+    // the pack beyond — rather than staring down a cue's length.
+    shotCam.cuePos = Cw.clone().addScaledVector(aimW, -0.6 * S).addScaledVector(up, 0.92 * S);
+    shotCam.cueLook = Cw.clone(); shotCam.cueLook.y = R * S; // look down AT the striker: hand + striker centred
+    shotCam.camPos = shotCam.cuePos.clone(); shotCam.camTgt = shotCam.cueLook.clone();
+  }
   controls.enabled = false;
-  camera.position.copy(cuePos);
-  camera.lookAt(cueLook);
-  placeCue(0);
-  cueStick.visible = true;
+  camera.position.copy(shotCam.cuePos);
+  camera.lookAt(shotCam.cueLook);
+  if (shotCam.flick) { placeFlickHand(1); flickHand.visible = true; cueStick.visible = false; }
+  else { placeCue(0); cueStick.visible = true; }
 }
 // Position the cue with its tip `back` metres behind contact along the (possibly elevated) shaft axis.
 function placeCue(back) {
@@ -1030,6 +1085,15 @@ function placeCue(back) {
 function driveShotCamCueing(now) {
   const cp = Math.min(1, (now - shotCam.start) / (CUE_DUR * 1000));
   const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+  if (shotCam.flick) {
+    // Draw the finger steadily back, then snap it forward — extended exactly at contact.
+    const cock = cp < 0.68 ? easeOut(cp / 0.68) : Math.max(0, 1 - (cp - 0.68) / 0.32);
+    placeFlickHand(cock);
+    camera.position.copy(shotCam.cuePos);
+    camera.lookAt(shotCam.cueLook);
+    if (cp >= 1) { flickHand.visible = false; shotCam.struck = true; return false; }
+    return true;
+  }
   let back; // metres the tip is drawn back from contact
   if (cp < 0.6) {
     back = 0.09 * (0.5 - 0.5 * Math.cos((cp / 0.6) * Math.PI * 6)); // ~3 practice feathers
@@ -1053,6 +1117,7 @@ function driveShotCamWatch(dt) {
 function endShotCam() {
   shotCam = null;
   cueStick.visible = false;
+  flickHand.visible = false;
   controls.enabled = true;
 }
 

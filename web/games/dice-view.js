@@ -63,7 +63,8 @@ export default function mount(ctx) {
   const engine = createDice();
   const sim = createDiceSim({ count: 6 });
   const S = sim.size, H = S / 2;
-  let seedCounter = 0x9e3779b9; // sim seeds come from an LCG stepped on each throw
+  // Random start so throws differ every page load; each throw then steps this LCG for a varied stream.
+  let seedCounter = ((Math.random() * 0x100000000) >>> 0) || 1;
 
   let mode = ctx.getMode();
   let difficulty = ctx.getDifficulty();

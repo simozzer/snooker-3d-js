@@ -550,7 +550,9 @@ const isAiTurn = () => !trick && !game.frame.frameOver && (selfPlay() || (aiEnab
 let playing = false;
 let simT = 0;
 let lastFrame = 0;
-let seedCounter = 1;
+// Random start so the FIRST frame (and its seeded rack jitter + AI) differs every page load; the
+// per-frame value is still recorded in frameSeed, so sharing/replay stays exactly reproducible.
+let seedCounter = (Math.random() * 0x100000000) >>> 0;
 // Shareable frame: the current frame's rack seed + the executed shots, encodable into a link (src/share.js).
 let frameSeed = 0;
 let frameShots = [];
@@ -754,7 +756,7 @@ function newFrameGame() {
   recallCount = 0; lastOutcome = null; awaitingMiss = false; el('missprompt').classList.remove('show'); // clear any miss state
   refRespotSpoken = false; refSay = ''; clearTimeout(refTimer); // reset the referee's per-frame call state
   clearShareContext(); // a fresh frame drops any shared/challenge context
-  frameSeed = seedCounter++; // record the rack seed so this frame is shareable/reproducible
+  frameSeed = seedCounter++ >>> 0; // record the rack seed (u32) so this frame is shareable/reproducible
   frameShots = [];
   aiRng = mulberry32(frameSeed); // fresh seed each frame → varied openings, still reproducible
   game = newGame(variant, { rng: aiRng });

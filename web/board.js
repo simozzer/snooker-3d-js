@@ -1,3 +1,4 @@
+import { VERSION } from './version.js';
 // board.js — the harness that turns board.html into a switchable board-game shell. It reads the
 // ?game= query string, lazily imports the matching view module, and drives it through one small
 // contract shared by chess / draughts / backgammon. All the outer chrome (opponent + difficulty
@@ -36,6 +37,7 @@
 // ---------------------------------------------------------------------------------------------
 
 const el = (id) => document.getElementById(id);
+el('version').textContent = `v${VERSION}`; // top-left build stamp (shared across every screen)
 
 // Registry: id → { title, module loader }. Adding a game = one entry + its view module.
 const GAMES = {

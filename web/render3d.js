@@ -23,6 +23,7 @@ import { aiTurn, chooseShotFinish, difficultyConfig, executeShot, shouldRecallMi
 import { build147 } from '../src/exhibition.js';
 import { getLevel, runTrickShot, findSolution, CURATED_COUNT } from '../src/trickshots.js';
 import { buildPlanCache, replayState } from './replay.js';
+import { VERSION } from './version.js';
 import { makeStudioEnv } from './materials.js';
 import { initSound, unlockAudio, knock, applause } from './sound.js';
 import { initReferee, announce } from './referee.js';
@@ -285,6 +286,7 @@ function applyState(state, dt) {
 
 // --- UI + turn loop --------------------------------------------------------------------------
 const el = (id) => document.getElementById(id);
+el('version').textContent = `v${VERSION}`; // top-left build stamp (shared across every screen)
 const status = el('status');
 const scoreEl = el('scores');
 const sliders = { angle: el('angle'), power: el('power') };

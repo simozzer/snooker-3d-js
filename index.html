@@ -41,9 +41,12 @@
       .pill.board { color: #ffdf6b; background: rgba(255,210,80,.1); }
       footer { margin-top: 40px; font-size: 12px; color: #6f8496; text-align: center; }
       footer a { color: #7fb0d8; }
+      #version { position: fixed; top: 10px; left: 12px; z-index: 50; pointer-events: none; user-select: none;
+        font: 600 12px/1 system-ui, sans-serif; letter-spacing: .5px; color: #6f8496; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
     </style>
   </head>
   <body>
+    <div id="version"></div>
     <div class="bg" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
     <header>
       <h1>Games <span class="dot">·</span> Compendium</h1>
@@ -95,5 +98,9 @@
       </div>
     </main>
     <footer>Deterministic engines, no network needed. <a href="web/render3d.html">Open the 3D table →</a></footer>
+    <script type="module">
+      import { VERSION } from './web/version.js';
+      document.getElementById('version').textContent = `v${VERSION}`;
+    </script>
   </body>
 </html>

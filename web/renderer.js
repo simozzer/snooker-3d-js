@@ -11,7 +11,7 @@ import { simulate } from '../src/simulate.js';
 import { twoPhasePlan, posAt } from '../src/motion.js';
 import { chooseShot, chooseShotFinish, applyError } from '../src/ai.js';
 
-const VERSION = '0.10c'; // shown in the top-line title so players can report which build they run (keep in sync with package.json)
+const VERSION = '0.5'; // shown in the top-line title so players can report which build they run (keep in sync with package.json)
 const VARIANTS = { snooker, doublesnooker: doubleSnooker, pool, nineball, billiards };
 const canvas = document.getElementById('table');
 const ctx = canvas.getContext('2d');

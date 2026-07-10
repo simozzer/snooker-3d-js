@@ -63,7 +63,8 @@ export default function mount(ctx) {
   const engine = createDice();
   const sim = createDiceSim({ count: 6 });
   const S = sim.size, H = S / 2;
-  let seedCounter = 0x9e3779b9; // sim seeds come from an LCG stepped on each throw
+  // Random start so throws differ every page load; each throw then steps this LCG for a varied stream.
+  let seedCounter = ((Math.random() * 0x100000000) >>> 0) || 1;
 
   let mode = ctx.getMode();
   let difficulty = ctx.getDifficulty();
@@ -84,8 +85,8 @@ export default function mount(ctx) {
   scene.environment = makeStudioEnv(renderer);
 
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-  camera.position.set(0, 8.4, 6.6);
-  camera.lookAt(0, 0, -0.2);
+  camera.position.set(0, 12.8, 10.4);
+  camera.lookAt(0, 0, -0.6);
 
   // lights
   const hemi = new THREE.HemisphereLight(0xdfe8f2, 0x24303a, 0.85);
@@ -95,7 +96,7 @@ export default function mount(ctx) {
   key.castShadow = true;
   key.shadow.mapSize.set(1024, 1024);
   const sc = key.shadow.camera;
-  sc.left = -7; sc.right = 7; sc.top = 6; sc.bottom = -6; sc.near = 1; sc.far = 24;
+  sc.left = -9; sc.right = 9; sc.top = 8; sc.bottom = -8; sc.near = 1; sc.far = 28;
   key.shadow.bias = -0.0005;
   scene.add(key);
 
@@ -127,9 +128,11 @@ export default function mount(ctx) {
     }));
     const mesh = new THREE.Mesh(dieGeo, mats);
     mesh.castShadow = true; mesh.userData.index = i;
-    // selection outline: a slightly larger translucent green shell, hidden by default
-    const glow = new THREE.Mesh(new THREE.BoxGeometry(S * 1.14, S * 1.14, S * 1.14),
-      new THREE.MeshBasicMaterial({ color: GREEN, transparent: true, opacity: 0.0, depthWrite: false }));
+    // selection halo: a larger additive green shell that glows around the die. Faint + static for a
+    // merely SELECTABLE die; bright + pulsing (plus an emissive glow on the die) once SELECTED.
+    const glow = new THREE.Mesh(new THREE.BoxGeometry(S * 1.32, S * 1.32, S * 1.32),
+      new THREE.MeshBasicMaterial({ color: GREEN, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    glow.visible = false;
     mesh.add(glow); mesh.userData.glow = glow;
     scene.add(mesh);
     diceMeshes.push(mesh);
@@ -224,18 +227,40 @@ export default function mount(ctx) {
     for (const m of mesh.material) { m.color.setScalar(dim ? 0.55 : 1); m.needsUpdate = false; }
   }
 
+  // Mark each die as selected / selectable / neither. Actual halo opacity for selected dice is
+  // driven per-frame in pulseHalos() so it breathes; selectable dice get a faint constant outline.
   function updateHighlights() {
     const s = engine.state();
     for (let i = 0; i < 6; i++) {
       const d = s.dice[i];
-      const glow = diceMeshes[i].userData.glow;
-      let op = 0;
+      const mesh = diceMeshes[i];
+      const glow = mesh.userData.glow;
+      let mood = 'none';
       if (!over && !busy && s.phase === 'pick' && !d.held) {
-        if (d.picked) op = 0.5;
-        else if (engine.eligible(i) && humanControlling()) op = 0.22;
+        if (d.picked) mood = 'selected';
+        else if (engine.eligible(i) && humanControlling()) mood = 'selectable';
       }
-      glow.material.opacity = op;
+      mesh.userData.mood = mood;
+      glow.visible = mood !== 'none';
+      if (mood === 'selectable') { glow.scale.setScalar(0.86); glow.material.opacity = 0.18; }
+      setEmissive(mesh, mood === 'selected' ? 0x1f7a45 : 0x000000);
     }
+  }
+
+  // Selected dice pulse: a living green halo that's unmistakable next to a static selectable outline.
+  function pulseHalos() {
+    const t = perfNow() / 1000;
+    const puls = 0.5 + 0.28 * Math.sin(t * 5.5);
+    for (const mesh of diceMeshes) {
+      if (mesh.userData.mood !== 'selected') continue;
+      const glow = mesh.userData.glow;
+      glow.material.opacity = puls;
+      glow.scale.setScalar(1 + 0.05 * Math.sin(t * 5.5));
+    }
+  }
+
+  function setEmissive(mesh, hex) {
+    for (const m of mesh.material) if (m.emissive) m.emissive.setHex(hex);
   }
 
   // ---- roll trajectory playback -------------------------------------------------------------
@@ -439,6 +464,7 @@ export default function mount(ctx) {
   function renderScene() { renderer.render(scene, camera); }
   function loop() {
     if (playback) stepPlayback();
+    pulseHalos();
     renderScene();
     raf = requestAnimationFrame(loop);
   }

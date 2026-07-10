@@ -113,8 +113,8 @@ function snapQuat(q) {
 // ---- simulation ------------------------------------------------------------------------------
 const DEFAULTS = {
   count: 6,
-  size: 0.9,            // die side length (world units)
-  tray: { halfX: 4.2, halfZ: 3.0 }, // inner half-extents of the walled tray on the floor
+  size: 0.78,           // die side length (world units)
+  tray: { halfX: 6.0, halfZ: 4.2 }, // inner half-extents of the walled tray on the floor
   gravity: 22,
   restitution: 0.32,    // bounciness of die/floor contacts
   restSlop: 1.0,        // closing speed below which restitution is dropped (kills micro-bouncing)

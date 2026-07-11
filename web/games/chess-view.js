@@ -17,6 +17,12 @@ const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 
 const ANIM_MS = 160; // piece-slide duration; short enough to feel snappy, long enough to read the move
 
+const colourName = { w: 'White', b: 'Black' };
+// Online seat ↔ colour: seat 0 (the room's creator) is White and moves first, matching the relay's
+// turn-0-first rule and the engine's white-to-move start. Seat 1 is Black.
+const COLOUR_FOR_SEAT = ['w', 'b'];
+const seatForColour = (c) => (c === 'w' ? 0 : 1);
+
 export default function mount(ctx) {
   const { canvas, box, ui, getMode, getDifficulty } = ctx;
   const engine = createChess();
@@ -34,6 +40,8 @@ export default function mount(ctx) {
   let stopAnim = null;   // canceller for the animate() rAF loop
   let thinking = false;  // AI is mid-search (input frozen, "thinking…" prompt shown)
   let aiToken = 0;       // bumped on any interruption (undo/newGame/mode change) to void a stale AI reply
+  let onlineSeat = -1;   // our seat (0/1) in an online game, or -1 when offline
+  let gameOverSent = false; // report a finished online game to the relay only once
 
   // ---------------------------------------------------------------------------------------------------
   // Geometry: engine board()[rank][file] has rank 0 = rank 1. We draw White at the BOTTOM, so screen row
@@ -181,6 +189,11 @@ export default function mount(ctx) {
     if (over) { ui.turn(null); return; }
     const t = engine.turn();
     const check = engine.inCheck() ? ' — Check!' : '';
+    if (isOnline()) {
+      if (!ctx.net.isReady()) { ui.turn('Waiting for opponent…'); ui.status(`You are ${colourName[myColour()]}.`); return; }
+      ui.turn(t === myColour() ? `Your move (${colourName[t]})${check}` : `Opponent to move (${colourName[t]})${check}`);
+      return;
+    }
     if (mode === 'ai') {
       ui.turn(t === 'w' ? `Your move (White)${check}` : 'AI is thinking…');
     } else {
@@ -188,21 +201,28 @@ export default function mount(ctx) {
     }
   }
 
+  const isOnline = () => onlineSeat >= 0 && !!ctx.net?.isOnline();
+  const myColour = () => COLOUR_FOR_SEAT[onlineSeat];
+
   // Whether a human is allowed to touch the board right now.
   function humanToMove() {
     if (over || thinking || anim) return false;
+    if (isOnline()) return ctx.net.isReady() && engine.turn() === myColour(); // both seats present, our turn
     if (mode === 'human') return true;
     return engine.turn() === 'w'; // in AI mode the human is always White
   }
 
-  // Apply a validated public move, animate it, then advance the game.
+  // Apply a validated public move (our OWN move: local human or the AI), animate it, then advance the
+  // game. Online, relay only what the peer's deterministic engine needs to reproduce it; the peer
+  // re-derives captures/castling/promotion from {from,to,promotion}. `next` is the seat now to move.
   function applyMove(m) {
     const res = engine.move(m);
     if (!res.ok) return false;
     selected = null; legal = [];
     lastMove = { from: m.from, to: m.to };
     ui.status('');
-    ui.setUndo(true);
+    ui.setUndo(!isOnline()); // no unilateral take-backs online
+    if (isOnline()) ctx.net.send({ from: m.from, to: m.to, promotion: res.promotion }, seatForColour(engine.turn()));
     animateMove(m.from, m.to, afterMove);
     return true;
   }
@@ -214,12 +234,16 @@ export default function mount(ctx) {
       render();
       ui.turn(null);
       ui.result(st.reason || 'Game over');
+      if (isOnline() && !gameOverSent) { // tally once; both clients report, the relay dedupes per room
+        gameOverSent = true;
+        ctx.net.sendGameOver(st.result === 'checkmate' ? seatForColour(st.winner) : null); // draws → null
+      }
       return;
     }
     render();
     promptTurn();
-    // Hand off to the AI when it's Black's turn in AI mode.
-    if (mode === 'ai' && engine.turn() === 'b') scheduleAI();
+    // Hand off to the AI when it's Black's turn in AI mode (never online).
+    if (!isOnline() && mode === 'ai' && engine.turn() === 'b') scheduleAI();
   }
 
   function scheduleAI() {
@@ -309,6 +333,7 @@ export default function mount(ctx) {
   // ---------------------------------------------------------------------------------------------------
   function newGame() {
     aiToken++;              // void any in-flight AI search
+    onlineSeat = -1;        // a fresh local game leaves online play
     engine.reset();
     lastMove = null;        // fresh game — no previous move to highlight
     startFromPosition();
@@ -355,7 +380,7 @@ export default function mount(ctx) {
 
   function setMode(next) {
     mode = next;
-    newGame(); // start fresh so we never sit in a half-played mismatch between the two modes
+    if (next !== 'online') newGame(); // online games start via onlineStart, not here
   }
 
   function setDifficulty(next) {
@@ -363,6 +388,7 @@ export default function mount(ctx) {
   }
 
   function undo() {
+    if (isOnline()) return; // a networked game can't be unilaterally taken back
     cancelAnim();
     aiToken++;          // cancel a pending AI reply if one is mid-flight
     thinking = false;
@@ -382,6 +408,69 @@ export default function mount(ctx) {
     ui.setUndo(hist.length > 0);
     render();
     promptTurn();
+  }
+
+  // --- online play (optional harness contract; see web/board.js + web/net.js) -------------------------
+  // Replay the ordered move-log (no animation) to reach the live position. Each {from,to,promotion} is
+  // re-matched against the engine's own legal moves, so a peer can never inject an illegal state.
+  function replayLog(log = []) {
+    let last = null;
+    for (const e of log) {
+      if (e.kind !== 'move' || !e.payload) continue;
+      const p = e.payload;
+      if (engine.move({ from: p.from, to: p.to, promotion: p.promotion }).ok) last = { from: p.from, to: p.to };
+    }
+    lastMove = last;
+  }
+
+  // Re-derive transient view state from the engine after a log replay (both entry points below).
+  function syncFromEngine() {
+    selected = null; legal = [];
+    const st = engine.status();
+    over = st.over;
+    render();
+    if (st.over) { ui.turn(null); ui.result(st.reason || 'Game over'); }
+    else { ui.result(null); ui.status(''); promptTurn(); }
+  }
+
+  // Enter online play at our seat: fresh engine, replay any existing log (a mid-game join hands us a
+  // populated log), then paint. onlineSeat gates input to our colour's turns.
+  function onlineStart({ seat, log = [] }) {
+    aiToken++;
+    onlineSeat = seat;
+    gameOverSent = false;
+    thinking = false;
+    cancelAnim();
+    engine.reset();
+    replayLog(log);
+    resize();               // (re)fit + first paint
+    ui.setUndo(false);      // no unilateral undo online
+    syncFromEngine();
+  }
+
+  function setOnlineReady() { render(); promptTurn(); } // ready-state changed → repaint banners/gating
+
+  // Apply a peer's move (animated). engine.move validates against its own legal list, so a desynced or
+  // illegal payload is ignored rather than corrupting the board.
+  function applyRemoteMove(payload) {
+    if (!payload) return;
+    const m = { from: payload.from, to: payload.to, promotion: payload.promotion };
+    const res = engine.move(m);
+    if (!res.ok) return;
+    selected = null; legal = [];
+    lastMove = { from: m.from, to: m.to };
+    ui.status('');
+    animateMove(m.from, m.to, afterMove);
+  }
+
+  // Full re-sync (reconnect or mid-game join): rebuild the position from the authoritative log.
+  function onlineResync(log = []) {
+    aiToken++;
+    thinking = false;
+    cancelAnim();
+    engine.reset();
+    replayLog(log);
+    syncFromEngine();
   }
 
   function destroy() {
@@ -415,5 +504,6 @@ export default function mount(ctx) {
       <li>Draws also come from insufficient material, the 50-move rule, or threefold repetition.</li>
     </ul>`;
 
-  return { newGame, setMode, setDifficulty, undo, resize, destroy, getShareToken, loadShare, rulesHtml };
+  return { newGame, setMode, setDifficulty, undo, resize, destroy, getShareToken, loadShare, rulesHtml,
+           onlineStart, setOnlineReady, applyRemoteMove, onlineResync };
 }

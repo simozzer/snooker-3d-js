@@ -16,14 +16,23 @@ export class Stats {
     return r ? { games: r.games, wins: r.wins, name: r.name ?? null } : { games: 0, wins: 0, name: null };
   }
 
-  // Record one completed game for a player. `won` bumps their win count. Returns the new totals.
-  recordGame(sub, name, won = false) {
+  // Record one completed game for a player. `won` bumps their win count. `game` (optional) is the
+  // game type (chess, othello, …) so we can also keep a per-game breakdown for the score tables.
+  // Returns the new OVERALL totals. Older snapshots without a `byGame` map upgrade lazily on write.
+  recordGame(sub, name, won = false, game = null) {
     if (!sub) return { games: 0, wins: 0 };
     const r = this._m.get(sub) || { games: 0, wins: 0, name: name ?? null, firstSeen: this._now() };
     r.games += 1;
     if (won) r.wins += 1;
     if (name) r.name = name;
     r.lastSeen = this._now();
+    if (game) {
+      if (!r.byGame) r.byGame = {};
+      const g = r.byGame[game] || { games: 0, wins: 0 };
+      g.games += 1;
+      if (won) g.wins += 1;
+      r.byGame[game] = g;
+    }
     this._m.set(sub, r);
     this._persist(this.snapshot());
     return { games: r.games, wins: r.wins };
@@ -39,5 +48,26 @@ export class Stats {
       .sort((a, b) => b.wins - a.wins || b.games - a.games)
       .slice(0, n)
       .map((r) => ({ name: r.name ?? 'player', games: r.games, wins: r.wins }));
+  }
+
+  // Top N players for ONE game type (chess, othello, …), same ranking as `top`. Players who've never
+  // played that game are excluded. Empty array for an unseen game.
+  topByGame(game, n = 10) {
+    return [...this._m.values()]
+      .filter((r) => r.byGame?.[game]?.games > 0)
+      .map((r) => ({ name: r.name ?? 'player', games: r.byGame[game].games, wins: r.byGame[game].wins }))
+      .sort((a, b) => b.wins - a.wins || b.games - a.games)
+      .slice(0, n);
+  }
+
+  // The whole score board in one shot, for the Community page: the overall top N, a per-game map
+  // (only game types with recorded results appear), and how many distinct players are registered.
+  board(n = 10) {
+    const gameKeys = new Set();
+    for (const r of this._m.values()) if (r.byGame) for (const k of Object.keys(r.byGame)) gameKeys.add(k);
+    const byGame = {};
+    for (const k of [...gameKeys].sort()) byGame[k] = this.topByGame(k, n);
+    const players = [...this._m.values()].filter((r) => r.games > 0).length;
+    return { overall: this.top(n), byGame, players };
   }
 }

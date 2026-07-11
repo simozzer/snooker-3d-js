@@ -113,12 +113,13 @@ wss.on('connection', (ws) => {
         const goCode = up(m.code);
         const sum = rooms.playSummary(goCode);
         if (!sum || sum.counted || sum.movers.length < 2 || sum.moves < MIN_MOVES) break;
+        const gameType = rooms.get(goCode)?.game ?? null; // so the result lands in the right score table
         rooms.markCounted(goCode);
         const winner = Number.isInteger(m.winner) ? m.winner : null;
         for (const part of sum.participants) {
           const w = sockets.get(part.pid);
           if (!w?.identity?.sub) continue;
-          const rec = stats.recordGame(w.identity.sub, w.identity.name, winner !== null && part.seat === winner);
+          const rec = stats.recordGame(w.identity.sub, w.identity.name, winner !== null && part.seat === winner, gameType);
           send(w, { type: 'stats', games: rec.games, wins: rec.wins });
         }
         break;
@@ -152,6 +153,24 @@ wss.on('connection', (ws) => {
         // Public: top players by wins. Just names + counts (no identity), so anyone may read it.
         send(ws, { type: 'leaderboard', top: stats.top(10) });
         break;
+      case 'scores':
+        // Public: the full Community score board — overall top plus a per-game breakdown.
+        send(ws, { type: 'scores', ...stats.board(10) });
+        break;
+      case 'online': {
+        // Public: who's here right now. `count` is every open socket (anyone with a compendium page
+        // open); `users` are the signed-in players (deduped by name), with what they're mid-game in.
+        const playing = rooms.playingMap();
+        const users = [];
+        for (const set of presence.values()) {
+          let name = null, game = null;
+          for (const w of set) { name = w.identity?.name ?? name; game = playing.get(w.pid) ?? game; }
+          if (name) users.push({ name, playing: game });
+        }
+        users.sort((a, b) => a.name.localeCompare(b.name));
+        send(ws, { type: 'online', count: wss.clients.size, signedIn: users.length, users });
+        break;
+      }
       case 'invite': {
         // A signed-in host rings a friend by name to join THEIR room. Requires a verified identity (so
         // the invite carries a real "from"), and that the host actually holds a seat in that room.

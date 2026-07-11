@@ -176,6 +176,47 @@ test('a signed-in host invites a friend by name; the friend gets a deep-linkable
   ada.close(); bob.close();
 });
 
+test('the score board breaks results down by game type, and needs no auth', async () => {
+  // Runs after the tally test, so the relay's stats hold a completed DRAUGHTS game (Ada beat Bob).
+  const anon = new RelayClient({ url, autoReconnect: false }); await anon.connect();
+  const got = waitFor(anon, 'scores');
+  anon.requestScores();
+  const board = await got;
+  assert.ok(board.players >= 2, 'at least two registered players');
+  assert.ok(Array.isArray(board.overall) && board.overall.length >= 2, 'overall table present');
+  assert.ok(board.byGame.draughts, 'a draughts table exists');
+  const ada = board.byGame.draughts.find((p) => p.name === 'Ada');
+  const bob = board.byGame.draughts.find((p) => p.name === 'Bob');
+  assert.deepEqual({ games: ada.games, wins: ada.wins }, { games: 1, wins: 1 }, 'Ada: 1 draughts win');
+  assert.equal(bob.wins, 0, 'Bob: 0 draughts wins');
+  assert.ok(board.byGame.draughts.indexOf(ada) < board.byGame.draughts.indexOf(bob), 'winner ranks first');
+  anon.close();
+});
+
+test('online lists signed-in players (deduped by name) and counts every socket', async () => {
+  const ada = new RelayClient({ url, autoReconnect: false }); await ada.connect();
+  await ada.authenticate(await sign({ name: 'Ada', sub: 'ada-online' }));
+  const bob = new RelayClient({ url, autoReconnect: false }); await bob.connect();
+  await bob.authenticate(await sign({ name: 'Bob', sub: 'bob-online' }));
+  const anon = new RelayClient({ url, autoReconnect: false }); await anon.connect(); // counted, unnamed
+
+  const got = waitFor(ada, 'online');
+  ada.requestOnline();
+  const on = await got;
+  assert.ok(on.count >= 3, 'every open socket is counted (incl. the anonymous one)');
+  const names = on.users.map((u) => u.name);
+  assert.ok(names.includes('Ada') && names.includes('Bob'), 'both signed-in players listed');
+  assert.ok(!names.includes(null) && on.users.length <= on.count, 'anonymous socket is not named');
+
+  // When a signed-in player leaves, they drop out of the list on the next poll.
+  bob.close();
+  await new Promise((r) => setTimeout(r, 60));
+  const got2 = waitFor(ada, 'online');
+  ada.requestOnline();
+  assert.ok(!(await got2).users.some((u) => u.name === 'Bob'), 'departed player removed from presence');
+  ada.close(); anon.close();
+});
+
 test('invite needs a verified identity and room membership', async () => {
   const nobody = new RelayClient({ url, autoReconnect: false }); await nobody.connect();
   const e1 = waitFor(nobody, 'error');

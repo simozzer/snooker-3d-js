@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Community · Games compendium</title>
+    <meta name="description" content="Who's online across the games compendium, and the score tables for every game." />
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; font-family: system-ui, sans-serif; background: #12161b; color: #e8e8e8;
+        display: flex; flex-direction: column; align-items: center; padding: 40px 20px 60px; }
+      /* soft animated aurora, matching the landing page — cheap GPU transforms only */
+      .bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: #12161b; pointer-events: none; }
+      .bg span { position: absolute; width: 62vmax; height: 62vmax; border-radius: 50%; will-change: transform; }
+      .b1 { background: radial-gradient(circle,rgba(46,139,87,.38),rgba(46,139,87,0) 70%); top: -20%; left: -14%; animation: d1 32s ease-in-out infinite; }
+      .b2 { background: radial-gradient(circle,rgba(14,116,144,.36),rgba(14,116,144,0) 70%); top: 24%; left: 50%; animation: d2 38s ease-in-out infinite; }
+      .b3 { background: radial-gradient(circle,rgba(200,146,58,.28),rgba(200,146,58,0) 70%); top: 54%; left: -4%; animation: d3 44s ease-in-out infinite; }
+      @keyframes d1 { 50% { transform: translate(28vw,20vh) scale(1.2); } }
+      @keyframes d2 { 50% { transform: translate(-24vw,16vh) scale(.9); } }
+      @keyframes d3 { 50% { transform: translate(20vw,-18vh) scale(1.15); } }
+      @media (prefers-reduced-motion: reduce) { .bg span { animation: none; } }
+
+      header { text-align: center; margin-bottom: 22px; }
+      h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: 0.5px; }
+      h1 .dot { color: #54c98a; }
+      .tag { font-size: 14px; color: #9fb4c7; margin: 0; }
+      a.back { position: fixed; top: 10px; left: 90px; z-index: 50; font: 600 12px/1 system-ui, sans-serif;
+        color: #7fb0d8; text-decoration: none; }
+      a.back:hover { text-decoration: underline; }
+
+      main { width: 100%; max-width: 940px; display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
+      @media (max-width: 780px) { main { grid-template-columns: 1fr; } }
+
+      .card { background: #1b2229; border: 1px solid #2a333d; border-radius: 14px; padding: 18px; }
+      .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1.1px; color: #7f93a5; margin: 0 0 12px;
+        display: flex; align-items: center; justify-content: space-between; }
+      .card h2 .refresh { cursor: pointer; background: #2a333d; border: none; color: #cfe0ee; border-radius: 7px;
+        padding: 3px 8px; font-size: 13px; line-height: 1; }
+
+      /* online panel */
+      .online-count { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+      .online-count .n { font-size: 34px; font-weight: 800; color: #54c98a; line-height: 1; }
+      .online-count .lbl { font-size: 13px; color: #9fb4c7; }
+      .online-sub { font-size: 12px; color: #7f93a5; margin-bottom: 12px; }
+      ul.people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+      ul.people li { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #232c35; font-size: 13.5px; }
+      ul.people li:last-child { border-bottom: none; }
+      ul.people li.me .nm { color: #ffdf6b; font-weight: 700; }
+      .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #54c98a; flex: none; box-shadow: 0 0 0 0 rgba(84,201,138,.6); animation: pulse 2s infinite; }
+      @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(84,201,138,.5);} 70% { box-shadow: 0 0 0 6px rgba(84,201,138,0);} 100% { box-shadow: 0 0 0 0 rgba(84,201,138,0);} }
+      .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .badge { font-size: 10.5px; letter-spacing: .3px; color: #cfe0ee; background: #2a333d; border-radius: 999px; padding: 2px 8px; flex: none; }
+      .empty { color: #6f8496; font-size: 12.5px; padding: 6px 2px; line-height: 1.5; }
+
+      /* score tables */
+      .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+      .tab { cursor: pointer; border: 1px solid #2a333d; background: #171d24; color: #9fb4c7; border-radius: 999px;
+        padding: 6px 13px; font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+      .tab:hover { border-color: #3f5568; color: #cfe0ee; }
+      .tab.active { background: #2e7d5b; border-color: #2e7d5b; color: #fff; }
+      table.scores { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+      table.scores th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: #7f93a5;
+        font-weight: 600; padding: 4px 8px; border-bottom: 1px solid #2a333d; }
+      table.scores th.num, table.scores td.num { text-align: right; font-variant-numeric: tabular-nums; }
+      table.scores td { padding: 8px; border-bottom: 1px solid #232c35; color: #cbd6e0; }
+      table.scores tr:last-child td { border-bottom: none; }
+      table.scores tr.me td { color: #ffdf6b; }
+      table.scores tr.me td.rk { color: #ffdf6b; }
+      .rk { color: #7f93a5; width: 26px; }
+      .medal { width: 26px; }
+
+      #version { position: fixed; top: 10px; left: 12px; z-index: 50; pointer-events: none; user-select: none;
+        font: 600 12px/1 system-ui, sans-serif; letter-spacing: .5px; color: #6f8496; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+      #netstat { position: fixed; bottom: 10px; left: 12px; z-index: 50; display: none; align-items: center; gap: 6px;
+        pointer-events: none; user-select: none; font: 600 11px/1 system-ui, sans-serif; color: #8fa3b5; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+      #netstat.show { display: flex; }
+      #netstat .dot { width: 8px; height: 8px; border-radius: 50%; background: #6f8496; }
+      #netstat.online .dot { background: #54c98a; }
+      #netstat.connecting .dot { background: #ffcf5b; animation: netpulse 1s ease-in-out infinite; }
+      #netstat.offline .dot { background: #e23b3b; }
+      @keyframes netpulse { 50% { opacity: .3; } }
+      #authbar { position: fixed; top: 10px; right: 14px; z-index: 50; display: flex; align-items: center; gap: 8px;
+        font: 600 12px/1 system-ui, sans-serif; color: #9fb4c7; }
+      #authbar button { font: 600 12px system-ui, sans-serif; padding: 6px 12px; border: 0; border-radius: 8px; cursor: pointer; background: #2e7d5b; color: #fff; }
+      #authbar button.sec { background: #33404c; color: #cfe0ee; }
+    </style>
+  </head>
+  <body>
+    <div id="version"></div>
+    <a class="back" href="../index.html">← All games</a>
+    <div id="authbar" style="display:none;">
+      <span id="userchip">Playing offline</span>
+      <button id="login">Log in</button>
+      <button id="logout" class="sec" style="display:none;">Log out</button>
+    </div>
+    <div id="netstat"><span class="dot"></span><span id="netstat-label">Server</span></div>
+    <div class="bg" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+    <header>
+      <h1>Community <span class="dot">·</span> who's here</h1>
+      <p class="tag">Who's online across the compendium right now, and the score tables for every game.</p>
+    </header>
+    <main>
+      <section class="card" id="online-card">
+        <h2>Online now <button class="refresh" id="online-refresh" title="Refresh">⟳</button></h2>
+        <div class="online-count"><span class="n" id="online-n">–</span><span class="lbl">connected</span></div>
+        <div class="online-sub" id="online-sub"></div>
+        <ul class="people" id="people"></ul>
+      </section>
+      <section class="card" id="scores-card">
+        <h2>Score tables <button class="refresh" id="scores-refresh" title="Refresh">⟳</button></h2>
+        <div class="tabs" id="tabs"></div>
+        <div id="scores-body"></div>
+      </section>
+    </main>
+    <script type="module" src="./lobby.js"></script>
+  </body>
+</html>

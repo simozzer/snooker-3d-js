@@ -60,6 +60,15 @@ export class Rooms {
     return room ? [...room.players.keys()] : [];
   }
 
+  // pid → game type for everyone currently seated in a room, so the transport can tell the Community
+  // page who's mid-game and in what. A pid in more than one room resolves to the first found (rare).
+  playingMap() {
+    const m = new Map();
+    for (const room of this.rooms.values())
+      for (const pid of room.players.keys()) if (!m.has(pid)) m.set(pid, room.game);
+    return m;
+  }
+
   // Summary the transport uses to validate a completed game before tallying stats: how many moves
   // were made, which distinct seats actually moved, the participants (pid+seat) so the transport can
   // resolve their identities, and whether this room was already counted. Null if the room is gone.

@@ -132,6 +132,10 @@ export class RelayClient {
   // Ask for the top-players leaderboard; the reply arrives as a 'leaderboard' event (fire-and-forget so
   // it never contends with the single in-flight request slot used by create/join/auth).
   requestLeaderboard() { this._raw({ type: 'leaderboard' }); }
+  // Community page: the full score board (overall + per-game) and the who's-online list. Both are
+  // fire-and-forget; replies arrive as 'scores' and 'online' events. Safe to poll.
+  requestScores() { this._raw({ type: 'scores' }); }
+  requestOnline() { this._raw({ type: 'online' }); }
   // Report a finished game so the relay tallies stats. `winner` is the winning seat, or null for a draw.
   sendGameOver(winner) { this._raw({ type: 'game-over', code: this.code, winner }); }
   // Ask the relay to start a fresh game in the same room; it broadcasts a 'rematch' with the new seed.

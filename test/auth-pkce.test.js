@@ -57,6 +57,26 @@ test('login builds a PKCE auth URL with a challenge matching the stored verifier
   assert.equal(u.searchParams.get('code_challenge'), expected);
 });
 
+test('register opens the sign-up form (registrations endpoint) with the same PKCE params', async () => {
+  const r = rig('https://games.example/web/lobby.html');
+  const a = createAuth({ enabled: true, issuer: ISSUER, clientId: CLIENT }, r.deps);
+  await a.register();
+
+  const u = new URL(r.state.assigned);
+  assert.equal(u.origin + u.pathname, `${ISSUER}/protocol/openid-connect/registrations`, 'lands on the sign-up form');
+  assert.equal(u.searchParams.get('client_id'), CLIENT);
+  assert.equal(u.searchParams.get('code_challenge_method'), 'S256');
+  // A verifier is stashed so the callback token exchange works exactly as it does after login.
+  assert.ok(r.storage.getItem('oidc_verifier'), 'PKCE verifier stored for the callback');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(r.storage.getItem('oidc_verifier')));
+  assert.equal(u.searchParams.get('code_challenge'), Buffer.from(digest).toString('base64url'));
+});
+
+test('the disabled stub exposes a safe no-op register', async () => {
+  const a = createAuth({ enabled: false });
+  await a.register('google'); // must not throw
+});
+
 test('handleRedirect swaps the code for tokens, returns the user, and cleans the URL', async () => {
   const r = rig('https://games.example/web/board.html?game=draughts');
   const a = createAuth({ enabled: true, issuer: ISSUER, clientId: CLIENT }, r.deps);

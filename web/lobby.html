@@ -84,6 +84,22 @@
         font: 600 12px/1 system-ui, sans-serif; color: #9fb4c7; }
       #authbar button { font: 600 12px system-ui, sans-serif; padding: 6px 12px; border: 0; border-radius: 8px; cursor: pointer; background: #2e7d5b; color: #fff; }
       #authbar button.sec { background: #33404c; color: #cfe0ee; }
+
+      /* "join in" card — shown only to signed-out visitors, so logging in / signing up is one click */
+      #join { width: 100%; max-width: 940px; margin-bottom: 20px; display: none; align-items: center; gap: 16px;
+        flex-wrap: wrap; background: linear-gradient(120deg, rgba(46,139,87,.16), rgba(14,116,144,.14));
+        border: 1px solid rgba(84,201,138,.35); border-radius: 14px; padding: 16px 20px; }
+      #join.show { display: flex; }
+      #join .ic { font-size: 30px; line-height: 1; }
+      #join .txt { flex: 1; min-width: 200px; }
+      #join .t { font-size: 16px; font-weight: 700; color: #eafff3; margin-bottom: 3px; }
+      #join .s { font-size: 12.5px; color: #a8c3b6; line-height: 1.45; }
+      #join .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+      #join button { font: 700 13px system-ui, sans-serif; padding: 10px 16px; border: 0; border-radius: 9px; cursor: pointer; }
+      #join button.primary { background: #2e8b57; color: #fff; }
+      #join button.primary:hover { background: #34a066; }
+      #join button.sec { background: #2a333d; color: #cfe0ee; }
+      #join button.sec:hover { background: #33404c; }
     </style>
   </head>
   <body>
@@ -100,6 +116,17 @@
       <h1>Community <span class="dot">·</span> who's here</h1>
       <p class="tag">Who's online across the compendium right now, and the score tables for every game.</p>
     </header>
+    <section id="join">
+      <span class="ic">👋</span>
+      <div class="txt">
+        <div class="t">Claim your spot on the board</div>
+        <div class="s">Playing is always free and anonymous. Sign in to put your name on the leaderboard and invite friends by name — or create a free account in a few seconds.</div>
+      </div>
+      <div class="acts">
+        <button id="join-register" class="primary">Create account</button>
+        <button id="join-login" class="sec">Log in</button>
+      </div>
+    </section>
     <main>
       <section class="card" id="online-card">
         <h2>Online now <button class="refresh" id="online-refresh" title="Refresh">⟳</button></h2>

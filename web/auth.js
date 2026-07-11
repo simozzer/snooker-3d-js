@@ -37,6 +37,9 @@ export function createAuth(config = {}, deps = {}) {
   const base = issuer.replace(/\/$/, '');
   const ENDPOINT = {
     auth: `${base}/protocol/openid-connect/auth`,
+    // Keycloak's registrations endpoint is the auth endpoint that opens straight on the sign-up form
+    // (when self-registration is enabled on the realm). Same PKCE params, so getAccessToken works after.
+    register: `${base}/protocol/openid-connect/registrations`,
     token: `${base}/protocol/openid-connect/token`,
     logout: `${base}/protocol/openid-connect/logout`,
   };
@@ -65,11 +68,13 @@ export function createAuth(config = {}, deps = {}) {
 
   if (!enabled || !issuer) {
     // Disabled stub: the app calls these unconditionally, so they must be safe no-ops.
-    return { enabled: false, async handleRedirect() { return null; }, async login() {}, logout() {},
+    return { enabled: false, async handleRedirect() { return null; }, async login() {}, async register() {}, logout() {},
       getUser() { return null; }, async getAccessToken() { return null; } };
   }
 
-  async function login(provider) {
+  // Start the Authorization Code + PKCE flow at `endpoint` — the login form (ENDPOINT.auth) or the
+  // sign-up form (ENDPOINT.register). Both come back to the same redirect URI and token exchange.
+  async function authorize(endpoint, provider) {
     const verifier = randomString();
     const state = randomString(16);
     store.setItem('oidc_verifier', verifier);
@@ -80,8 +85,10 @@ export function createAuth(config = {}, deps = {}) {
       scope: scopes, state, code_challenge: await sha256(verifier), code_challenge_method: 'S256',
     });
     if (provider) params.set('kc_idp_hint', provider); // jump straight to google / microsoft / facebook
-    assign(`${ENDPOINT.auth}?${params}`);
+    assign(`${endpoint}?${params}`);
   }
+  const login = (provider) => authorize(ENDPOINT.auth, provider);
+  const register = (provider) => authorize(ENDPOINT.register, provider); // open the sign-up form directly
 
   // Called once on page load. If we're returning from Keycloak (?code present), exchange it for
   // tokens and clean the URL. Returns the logged-in user (or null).
@@ -135,5 +142,5 @@ export function createAuth(config = {}, deps = {}) {
     assign(`${ENDPOINT.logout}?${params}`);
   }
 
-  return { enabled: true, login, logout, handleRedirect, getUser, getAccessToken };
+  return { enabled: true, login, register, logout, handleRedirect, getUser, getAccessToken };
 }

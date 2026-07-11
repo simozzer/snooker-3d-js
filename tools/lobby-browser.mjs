@@ -150,6 +150,14 @@ test('the Community page connects, shows who is online, and lists the signed-in 
     'signed-in players not listed');
 });
 
+test('a signed-out visitor sees the join card with a Create account button', async (t) => {
+  if (guard(t)) return;
+  // The browser has no token, so the friendly join card must be visible with both actions.
+  assert.ok(await waitFor(`document.getElementById('join').classList.contains('show')`, { timeout: 6000 }), 'join card not shown to signed-out visitor');
+  assert.ok(await evaluate(`!!document.getElementById('join-register') && !!document.getElementById('join-login')`), 'join buttons missing');
+  assert.equal(await evaluate(`document.getElementById('authbar').style.display`), 'none', 'signed-in chip hidden when signed out');
+});
+
 test('the score tables render, with a Chess tab and Ada leading it', async (t) => {
   if (guard(t)) return;
   // Overall table shows first; the seeded chess game means a Chess tab exists too.

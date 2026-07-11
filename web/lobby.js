@@ -44,15 +44,19 @@ setNetStat('connecting', 'Connecting…');
 const auth = createAuth(AUTH);
 let myName = null; // our display name once authenticated, for highlighting
 function updateAuthUI() {
-  if (!auth.enabled) { el('authbar').style.display = 'none'; return; }
-  el('authbar').style.display = '';
+  if (!auth.enabled) { el('authbar').style.display = 'none'; el('join').classList.remove('show'); return; }
   const user = auth.getUser();
+  // Signed in → a compact chip + Log out, top-right. Signed out → the friendly "join in" card, so
+  // logging in OR creating an account is a single obvious click.
+  el('authbar').style.display = user ? '' : 'none';
+  el('join').classList.toggle('show', !user);
   el('userchip').textContent = user ? `Signed in as ${user.name}` : 'Playing offline';
-  el('login').style.display = user ? 'none' : '';
+  el('login').style.display = 'none';       // login now lives in the join card when signed out
   el('logout').style.display = user ? '' : 'none';
 }
-el('login').addEventListener('click', () => auth.login());
 el('logout').addEventListener('click', () => auth.logout());
+el('join-login').addEventListener('click', () => auth.login());
+el('join-register').addEventListener('click', () => auth.register()); // straight to the sign-up form
 
 // --- relay + data -------------------------------------------------------------------------------
 const relay = new RelayClient({});

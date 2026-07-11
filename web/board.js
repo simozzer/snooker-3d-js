@@ -88,6 +88,8 @@ if (!entry) {
       n.textContent = t || '';
       n.classList.toggle('show', !!t);
       el('newgame').disabled = false;
+      // Online: offer a rematch once a game finishes; hide it the moment a fresh game starts.
+      el('rematch').style.display = (netState.active && t) ? '' : 'none';
     },
     setUndo: (on) => { el('undo').disabled = !on; },
   };
@@ -168,6 +170,7 @@ if (!entry) {
         el('userchip').textContent = user ? `Signed in as ${user.name}` : 'Not signed in';
         el('login').style.display = user ? 'none' : '';
         el('logout').style.display = user ? '' : 'none';
+        updateInviteUI?.(); // reflect sign-in state in the invite row
       }
       const loggedIn = () => auth.enabled && !!auth.getUser();
       el('login').addEventListener('click', () => auth.login());   // → Keycloak (choose Google/MS/FB)
@@ -211,6 +214,7 @@ if (!entry) {
         const on = netState.active;
         el('newgame').style.display = on ? 'none' : '';
         el('sharelink').style.display = on ? 'none' : shareDefaultDisplay;
+        if (!on) el('rematch').style.display = 'none';
       }
 
       // --- leaderboard (top players by wins; public, see server/relay.js) ---------------------
@@ -229,14 +233,36 @@ if (!entry) {
       async function fetchLeaderboard() { try { const r = await ensureConnected(); r.requestLeaderboard(); } catch { /* offline — leave last view */ } }
       el('lb-refresh').addEventListener('click', fetchLeaderboard);
 
+      // --- incoming-invite toast ------------------------------------------------------------------
+      const titleFor = (g) => GAMES[g]?.title || g;
+      let pendingInvite = null;
+      function showInviteToast(m) {
+        pendingInvite = m;
+        el('it-msg').innerHTML = `<b>${escapeHtml(m.from)}</b> invited you to a game of ${escapeHtml(titleFor(m.game))}.`;
+        el('invite-toast').classList.add('show');
+      }
+      // Join via a deep link so a cross-game invite lands on the right board and auto-joins on load.
+      el('it-join').addEventListener('click', () => {
+        if (!pendingInvite) return;
+        location.href = `${location.pathname}?game=${encodeURIComponent(pendingInvite.game)}&join=${encodeURIComponent(pendingInvite.code)}`;
+      });
+      el('it-dismiss').addEventListener('click', () => { el('invite-toast').classList.remove('show'); pendingInvite = null; });
+
       function wireRelay(relay) {
         relay.on('leaderboard', (m) => renderLeaderboard(m.top || []));
+        relay.on('invited', (m) => showInviteToast(m));
+        relay.on('invite-sent', (m) => { el('invite-status').textContent = m.delivered ? `Invite sent to ${m.to}.` : `${m.to} isn’t online right now.`; });
         // Reachability light: 'welcome' fires on every (re)connect; close/error/reconnect flip it amber/red.
         relay.on('welcome', () => setNetStat('online', 'Server online'));
         relay.on('reconnecting', () => setNetStat('connecting', 'Reconnecting…'));
         relay.on('neterror', () => setNetStat('offline', 'Server unreachable'));
         relay.on('move', (m) => { if (m.seat !== relay.seat) controller.applyRemoteMove?.(m.payload); }); // ignore own echo
         relay.on('random', (m) => controller.applyRemoteRandom?.(m.value, m.seat));
+        relay.on('rematch', (m) => { // either player asked to play again — restart in place at the new seed
+          controller.onlineStart({ seat: relay.seat, seed: m.seed, players: netState.players, log: [] });
+          el('rematch').style.display = 'none';
+          setReady();
+        });
         relay.on('peer-joined', (m) => setReady(m.players));
         relay.on('peer-reconnected', (m) => setReady(m.players));
         relay.on('peer-left', (m) => { if (m.players) netState.players = m.players; netState.ready = false; controller.setOnlineReady?.(false); netStatus(`${roomLine()} — opponent disconnected, waiting…<br>${playerRoster()}`); });
@@ -277,6 +303,12 @@ if (!entry) {
         if (netState.relay && netState.active) { try { netState.relay.leave(); } catch { /* gone */ } }
         netState.active = false; netState.ready = false; netState.players = null;
         gateOnlineButtons(); // restore the local-only controls
+        updateInviteUI(); // hide the invite row (no room to invite to)
+      }
+
+      // Invite-a-friend row: only useful once you're signed in AND hold a room to invite them to.
+      function updateInviteUI() {
+        el('invite-row').style.display = (netState.active && loggedIn()) ? '' : 'none';
       }
 
       el('net-create').addEventListener('click', async () => {
@@ -289,13 +321,16 @@ if (!entry) {
           netState.players = [{ seat: created.seat, name: auth.getUser()?.name ?? null, connected: true }];
           controller.onlineStart({ seat: created.seat, seed: created.seed, players: netState.players, log: [] });
           setReady(netState.players);
+          updateInviteUI();
         } catch (e) { netStatus(`Couldn’t create room: ${e.message || e}`); }
       });
 
-      el('net-join').addEventListener('click', async () => {
+      el('rematch').addEventListener('click', () => { if (netState.active) netState.relay?.rematch(); });
+
+      // Shared join used by the Join button AND by an invite's ?join= deep link.
+      async function joinRoom(code) {
         if (needsLogin()) return;
-        const code = el('net-code').value.trim().toUpperCase();
-        if (code.length < 4) { netStatus('Enter the 4-letter room code.'); return; }
+        if (!code || code.length < 4) { netStatus('Enter the 4-letter room code.'); return; }
         try {
           netStatus('Joining…');
           const relay = await ensureConnected();
@@ -303,7 +338,18 @@ if (!entry) {
           netState.active = true; gateOnlineButtons();
           controller.onlineStart({ seat: joined.seat, seed: joined.seed, players: joined.players, log: joined.log });
           setReady(joined.players);
+          updateInviteUI();
         } catch (e) { netStatus(`Couldn’t join: ${e.message || e}`); }
+      }
+      el('net-join').addEventListener('click', () => joinRoom(el('net-code').value.trim().toUpperCase()));
+
+      // Invite a named friend to THIS room; the relay rings any of their online tabs.
+      el('invite-send').addEventListener('click', () => {
+        const to = el('invite-name').value.trim();
+        if (!to) { el('invite-status').textContent = 'Enter a friend’s name.'; return; }
+        if (!netState.active) { el('invite-status').textContent = 'Create or join a room first.'; return; }
+        netState.relay?.invite(to);
+        el('invite-status').textContent = `Inviting ${to}…`;
       });
 
       function applyMode(mode) {
@@ -332,7 +378,10 @@ if (!entry) {
           try { await auth.handleRedirect(); } catch { ui.status('Login didn’t complete — please try again.'); }
           updateAuthUI();
         }
-        probeRelay(); // always show the reachability light — connect on load, regardless of game/mode
+        await probeRelay(); // always show the reachability light — connect on load, regardless of game/mode
+        // Deep link from an invite (board.html?game=…&join=CODE): open the lobby and join automatically.
+        const joinParam = (params.get('join') || '').trim().toUpperCase();
+        if (joinParam && onlineOk) { el('mode').value = 'online'; applyMode('online'); await joinRoom(joinParam); }
       })();
     })
     .catch((err) => {

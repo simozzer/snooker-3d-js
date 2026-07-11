@@ -154,6 +154,36 @@ test('playSummary reports moves/movers/participants and markCounted is once-only
   assert.equal(r.playSummary('NOPE'), null);
 });
 
+test('rematch reshuffles the seed, clears the log, resets turn + tally, keeps seats', () => {
+  const r = makeRooms();
+  r.create({ pid: 'host', game: 'draughts' }); // seed = 101
+  r.join({ pid: 'guest', code: 'TEST' });
+  r.move({ pid: 'host', code: 'TEST', payload: { n: 1 }, next: 1 }); // turn → 1, log length 1
+  r.markCounted('TEST');
+  const before = r.get('TEST');
+  assert.equal(before.turn, 1);
+  assert.equal(before.log.length, 1);
+
+  const res = r.rematch({ pid: 'guest', code: 'TEST' }); // either player may call it
+  assert.equal(res.all.type, 'rematch');
+  assert.equal(res.all.turn, 0);
+  assert.notEqual(res.all.seed, 101);            // a genuinely new deal
+  const after = r.get('TEST');
+  assert.equal(after.turn, 0);
+  assert.equal(after.log.length, 0);
+  assert.equal(after.counted, false);
+  assert.deepEqual([...after.players.keys()], ['host', 'guest']); // seats untouched
+});
+
+test('rematch is a no-op on an already-fresh board and rejects non-members / unknown rooms', () => {
+  const r = makeRooms();
+  r.create({ pid: 'host', game: 'draughts' });
+  r.join({ pid: 'guest', code: 'TEST' });
+  assert.equal(r.rematch({ pid: 'host', code: 'TEST' }), null); // nothing played yet → no-op
+  assert.equal(r.rematch({ pid: 'stranger', code: 'TEST' }).error, 'not-in-room');
+  assert.equal(r.rematch({ pid: 'host', code: 'NOPE' }).error, 'no-room');
+});
+
 test('sweep reaps rooms idle past the TTL', () => {
   const r = makeRooms();               // ttl 5000ms, clock +1000 per touch
   r.create({ pid: 'host', game: 'draughts' }); // touches move the clock forward

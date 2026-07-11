@@ -41,6 +41,19 @@ if (verifier.enabled) console.log(`auth: verifying tokens from ${process.env.OID
 const rooms = new Rooms();
 const sockets = new Map(); // pid → ws
 
+// Presence: which authenticated players are online, so a signed-in host can invite a friend BY NAME.
+// Keyed by lower-cased display name → the set of that person's live sockets (a name may be open in
+// more than one tab). Anonymous sockets are absent. Names aren't globally unique, but for a friend
+// group they're distinct enough; an ambiguous name simply rings every match.
+const presence = new Map(); // name(lower) → Set<ws>
+const addPresence = (ws) => {
+  const n = ws.identity?.name?.toLowerCase();
+  if (!n) return;
+  if (!presence.has(n)) presence.set(n, new Set());
+  presence.get(n).add(ws);
+};
+const dropPresence = (ws) => { for (const [n, set] of presence) { set.delete(ws); if (!set.size) presence.delete(n); } };
+
 const send = (ws, msg) => { if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg)); };
 const toPid = (pid, msg) => send(sockets.get(pid), msg);
 const up = (c) => (typeof c === 'string' ? c.toUpperCase() : c); // room codes are case-insensitive
@@ -85,6 +98,7 @@ wss.on('connection', (ws) => {
       case 'auth':
         try {
           ws.identity = await verifier.verify(m.token);
+          if (ws.identity) addPresence(ws); // now reachable by name for invites
           const st = stats.get(ws.identity?.sub); // greet the player with their running totals
           send(ws, { type: 'authed', name: ws.identity?.name ?? null, sub: ws.identity?.sub ?? null, games: st.games, wins: st.wins });
         } catch {
@@ -128,6 +142,9 @@ wss.on('connection', (ws) => {
       case 'random':
         dispatch(ws, ws.pid, rooms.random({ pid: ws.pid, code: up(m.code) }));
         break;
+      case 'rematch':
+        dispatch(ws, ws.pid, rooms.rematch({ pid: ws.pid, code: up(m.code) }));
+        break;
       case 'leave':
         dispatch(ws, ws.pid, rooms.leave({ pid: ws.pid, code: up(m.code) }));
         break;
@@ -135,6 +152,19 @@ wss.on('connection', (ws) => {
         // Public: top players by wins. Just names + counts (no identity), so anyone may read it.
         send(ws, { type: 'leaderboard', top: stats.top(10) });
         break;
+      case 'invite': {
+        // A signed-in host rings a friend by name to join THEIR room. Requires a verified identity (so
+        // the invite carries a real "from"), and that the host actually holds a seat in that room.
+        if (!ws.identity) { send(ws, { type: 'error', error: 'auth-required' }); break; }
+        const to = String(m.to ?? '').trim().toLowerCase();
+        const code = up(m.code);
+        const room = rooms.get(code);
+        if (!room || !room.players.has(ws.pid)) { send(ws, { type: 'error', error: 'not-in-room' }); break; }
+        const targets = [...(presence.get(to) ?? [])].filter((t) => t !== ws && t.readyState === t.OPEN);
+        for (const t of targets) send(t, { type: 'invited', from: ws.identity.name, code, game: room.game });
+        send(ws, { type: 'invite-sent', to: m.to, delivered: targets.length }); // 0 → not online
+        break;
+      }
       case 'ping':
         send(ws, { type: 'pong' });
         break;
@@ -145,6 +175,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     const gonePid = ws.pid;
+    dropPresence(ws);
     if (sockets.get(gonePid) === ws) sockets.delete(gonePid);
     // Keep the seat (droppable disconnect) and notify survivors so they can show "opponent away".
     for (const r of rooms.disconnect(gonePid)) {

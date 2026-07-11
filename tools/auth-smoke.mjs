@@ -151,3 +151,41 @@ test('the leaderboard reflects tallied results, ranked by wins, and needs no aut
   assert.ok((await lb2).top.length >= 2, 'anonymous client can read the leaderboard');
   c.close(); anon.close();
 });
+
+test('a signed-in host invites a friend by name; the friend gets a deep-linkable invite', async () => {
+  const ada = new RelayClient({ url, autoReconnect: false }); await ada.connect();
+  await ada.authenticate(await sign({ name: 'Ada', sub: 'ada-inv' }));
+  const room = await ada.create({ game: 'chess' });
+
+  const bob = new RelayClient({ url, autoReconnect: false }); await bob.connect();
+  await bob.authenticate(await sign({ name: 'Bob', sub: 'bob-inv' })); // now present under 'bob'
+
+  const gotInvite = waitFor(bob, 'invited');
+  const gotReceipt = waitFor(ada, 'invite-sent');
+  ada.invite('BOB'); // case-insensitive name match
+  const inv = await gotInvite;
+  assert.equal(inv.from, 'Ada');
+  assert.equal(inv.code, room.code);
+  assert.equal(inv.game, 'chess');
+  assert.equal((await gotReceipt).delivered, 1);
+
+  // Inviting someone who isn't online reaches nobody, but is not an error.
+  const off = waitFor(ada, 'invite-sent');
+  ada.invite('ghost');
+  assert.equal((await off).delivered, 0);
+  ada.close(); bob.close();
+});
+
+test('invite needs a verified identity and room membership', async () => {
+  const nobody = new RelayClient({ url, autoReconnect: false }); await nobody.connect();
+  const e1 = waitFor(nobody, 'error');
+  nobody.invite('ada'); // never authenticated
+  assert.equal((await e1).error, 'auth-required');
+
+  const cy = new RelayClient({ url, autoReconnect: false }); await cy.connect();
+  await cy.authenticate(await sign({ name: 'Cy', sub: 'cy-inv' }));
+  const e2 = waitFor(cy, 'error');
+  cy.invite('ada'); // authed, but holds no room to invite into
+  assert.equal((await e2).error, 'not-in-room');
+  nobody.close(); cy.close();
+});

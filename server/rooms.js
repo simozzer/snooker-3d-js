@@ -208,6 +208,24 @@ export class Rooms {
     return { code, all: { type: 'random', seq: entry.seq, seat: entry.seat, value } };
   }
 
+  // Start a fresh game in the SAME room (a rematch): new seed, cleared log, turn back to seat 0, and
+  // the tally-guard reset so the next result counts again. Seats/players are untouched. A no-op if the
+  // board is already fresh (so two players both clicking Rematch don't reshuffle twice). Any member may
+  // call it — a finished 2-player game is a mutual "play again".
+  rematch({ pid, code }) {
+    const room = this.rooms.get(code);
+    if (!room) return { error: 'no-room' };
+    if (!room.players.has(pid)) return { error: 'not-in-room' };
+    if (room.log.length === 0 && room.turn === 0 && !room.counted) return null; // already fresh
+    room.seed = this._randomU32();
+    room.turn = 0;
+    room.seq = 0;
+    room.counted = false;
+    room.log = [];
+    this._touch(room);
+    return { code, all: { type: 'rematch', seed: room.seed, turn: room.turn, game: room.game, seats: room.seats } };
+  }
+
   // --- departures & housekeeping -------------------------------------------------------------
 
   // Mark a player disconnected but KEEP their seat (so they can resume). Returns the rooms they were

@@ -134,6 +134,11 @@ export class RelayClient {
   requestLeaderboard() { this._raw({ type: 'leaderboard' }); }
   // Report a finished game so the relay tallies stats. `winner` is the winning seat, or null for a draw.
   sendGameOver(winner) { this._raw({ type: 'game-over', code: this.code, winner }); }
+  // Ask the relay to start a fresh game in the same room; it broadcasts a 'rematch' with the new seed.
+  rematch() { this._raw({ type: 'rematch', code: this.code }); }
+  // Ring a signed-in friend BY NAME to join our current room. They receive an 'invited' event; we get
+  // an 'invite-sent' with how many of their sockets it reached (0 = they're not online).
+  invite(to) { this._raw({ type: 'invite', to, code: this.code }); }
   leave() { this._raw({ type: 'leave', code: this.code }); this.code = null; this.seat = -1; }
 
   close() { this._closedByUs = true; try { this.ws?.close(); } catch { /* already gone */ } }

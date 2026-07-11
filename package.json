@@ -1,6 +1,6 @@
 {
   "name": "snooker-sim",
-  "version": "1.2",
+  "version": "1.3",
   "description": "Event-driven 2D snooker physics — faithful two-phase (slide→roll) ball motion with cue spin, built on the carrom-js analytic engine. Pure ES6, no dependencies.",
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "relay": "node server/relay.js",
     "test:relay": "node --test tools/relay-smoke.mjs",
     "test:net": "node --test tools/net-smoke.mjs",
-    "test:online": "node --test tools/relay-smoke.mjs tools/net-smoke.mjs tools/draughts-online-smoke.mjs tools/chess-online-smoke.mjs tools/backgammon-online-smoke.mjs tools/auth-smoke.mjs",
+    "test:online": "node --test tools/relay-smoke.mjs tools/net-smoke.mjs tools/draughts-online-smoke.mjs tools/chess-online-smoke.mjs tools/backgammon-online-smoke.mjs tools/othello-online-smoke.mjs tools/auth-smoke.mjs",
     "test:auth": "node --test tools/auth-smoke.mjs",
     "test:board": "node --test tools/board-online-smoke.mjs",
     "test:bg-browser": "node --test tools/backgammon-online-browser.mjs",

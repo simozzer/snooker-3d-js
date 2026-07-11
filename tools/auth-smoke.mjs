@@ -131,3 +131,23 @@ test('a finished game is tallied per authenticated player (win/loss)', async () 
   assert.equal(reAuth.games, 1, 'still 1 game — room counted only once');
   host.close(); guest.close();
 });
+
+test('the leaderboard reflects tallied results, ranked by wins, and needs no auth', async () => {
+  // Runs after the tally test above, so the relay's stats hold Ada (1 win) and Bob (0 wins).
+  const c = new RelayClient({ url, autoReconnect: false }); await c.connect();
+  const lb = waitFor(c, 'leaderboard');
+  c.requestLeaderboard();
+  const { top } = await lb;
+  const ada = top.find((p) => p.name === 'Ada');
+  const bob = top.find((p) => p.name === 'Bob');
+  assert.deepEqual({ games: ada.games, wins: ada.wins }, { games: 1, wins: 1 }, 'Ada: 1 game, 1 win');
+  assert.deepEqual({ games: bob.games, wins: bob.wins }, { games: 1, wins: 0 }, 'Bob: 1 game, 0 wins');
+  assert.ok(top.indexOf(ada) < top.indexOf(bob), 'the winner ranks above the loser');
+
+  // A fresh ANONYMOUS socket (never authenticated) can read the same public leaderboard.
+  const anon = new RelayClient({ url, autoReconnect: false }); await anon.connect();
+  const lb2 = waitFor(anon, 'leaderboard');
+  anon.requestLeaderboard();
+  assert.ok((await lb2).top.length >= 2, 'anonymous client can read the leaderboard');
+  c.close(); anon.close();
+});

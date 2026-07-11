@@ -23,6 +23,18 @@
       #lobby .row { display: flex; gap: 6px; }
       #net-status { min-height: 16px; }
       #net-status b { color: #ffdf6b; letter-spacing: 3px; font-size: 15px; }
+      #leaderboard { margin-top: 10px; }
+      .lb-head { display: flex; align-items: center; justify-content: space-between;
+        font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: #7f93a5; }
+      .lb-head button { padding: 2px 7px; font-size: 12px; background: #33404c; line-height: 1; }
+      .lb-list { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12.5px; }
+      .lb-list li { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; border-bottom: 1px solid #232c35; color: #cbd6e0; }
+      .lb-list li:last-child { border-bottom: none; }
+      .lb-list li .rank { color: #7f93a5; width: 16px; text-align: right; }
+      .lb-list li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .lb-list li .wl { color: #8fa3b5; font-variant-numeric: tabular-nums; }
+      .lb-list li.me .nm { color: #ffdf6b; font-weight: 700; }
+      .lb-empty { color: #6f8496; font-size: 11px; padding: 4px 0; }
       button { padding: 9px 12px; font-size: 14px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; background: #2e7d5b; color: #fff; }
       button:disabled { opacity: 0.5; cursor: default; }
       button.sec { background: #33404c; }
@@ -108,6 +120,10 @@
             <button id="net-join" class="sec">Join</button>
           </div>
           <div id="net-status" class="hint"></div>
+          <div id="leaderboard">
+            <div class="lb-head"><span>🏆 Top players</span><button id="lb-refresh" class="sec" title="Refresh">⟳</button></div>
+            <ol id="lb-list" class="lb-list"></ol>
+          </div>
         </div>
         <div id="gamecontrols"></div>
         <button id="newgame">New game</button>

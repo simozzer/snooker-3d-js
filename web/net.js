@@ -129,6 +129,9 @@ export class RelayClient {
   // turn passes to; omit to hand off round-robin (fine for 2-player alternating games).
   sendMove(payload, next) { this._raw({ type: 'move', code: this.code, payload, next }); }
   requestRandom() { this._raw({ type: 'random', code: this.code }); }
+  // Ask for the top-players leaderboard; the reply arrives as a 'leaderboard' event (fire-and-forget so
+  // it never contends with the single in-flight request slot used by create/join/auth).
+  requestLeaderboard() { this._raw({ type: 'leaderboard' }); }
   // Report a finished game so the relay tallies stats. `winner` is the winning seat, or null for a draw.
   sendGameOver(winner) { this._raw({ type: 'game-over', code: this.code, winner }); }
   leave() { this._raw({ type: 'leave', code: this.code }); this.code = null; this.seat = -1; }

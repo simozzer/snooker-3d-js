@@ -131,6 +131,10 @@ wss.on('connection', (ws) => {
       case 'leave':
         dispatch(ws, ws.pid, rooms.leave({ pid: ws.pid, code: up(m.code) }));
         break;
+      case 'leaderboard':
+        // Public: top players by wins. Just names + counts (no identity), so anyone may read it.
+        send(ws, { type: 'leaderboard', top: stats.top(10) });
+        break;
       case 'ping':
         send(ws, { type: 'pong' });
         break;

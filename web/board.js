@@ -213,7 +213,24 @@ if (!entry) {
         el('sharelink').style.display = on ? 'none' : shareDefaultDisplay;
       }
 
+      // --- leaderboard (top players by wins; public, see server/relay.js) ---------------------
+      const lbList = el('lb-list');
+      const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      function renderLeaderboard(top) {
+        const myName = auth.getUser()?.name || null;
+        if (!top || !top.length) { lbList.innerHTML = '<li class="lb-empty">No games played yet — be the first.</li>'; return; }
+        lbList.innerHTML = top.map((p, i) => {
+          const me = myName && p.name === myName ? ' class="me"' : '';
+          return `<li${me}><span class="rank">${i + 1}</span><span class="nm">${escapeHtml(p.name || 'player')}</span>`
+            + `<span class="wl">${p.wins}W · ${p.games}G</span></li>`;
+        }).join('');
+      }
+      // Fetch over the (already-open) reachability socket; the reply arrives as a 'leaderboard' event.
+      async function fetchLeaderboard() { try { const r = await ensureConnected(); r.requestLeaderboard(); } catch { /* offline — leave last view */ } }
+      el('lb-refresh').addEventListener('click', fetchLeaderboard);
+
       function wireRelay(relay) {
+        relay.on('leaderboard', (m) => renderLeaderboard(m.top || []));
         // Reachability light: 'welcome' fires on every (re)connect; close/error/reconnect flip it amber/red.
         relay.on('welcome', () => setNetStat('online', 'Server online'));
         relay.on('reconnecting', () => setNetStat('connecting', 'Reconnecting…'));
@@ -224,8 +241,8 @@ if (!entry) {
         relay.on('peer-reconnected', (m) => setReady(m.players));
         relay.on('peer-left', (m) => { if (m.players) netState.players = m.players; netState.ready = false; controller.setOnlineReady?.(false); netStatus(`${roomLine()} — opponent disconnected, waiting…<br>${playerRoster()}`); });
         relay.on('resumed', (m) => { controller.onlineResync?.(m.log); setReady(m.players); });
-        relay.on('authed', () => { if (netState.active) setReady(); }); // refresh roster with my games count
-        relay.on('stats', () => { if (netState.active) setReady(); });  // updated totals after a game
+        relay.on('authed', () => { if (netState.active) setReady(); relay.requestLeaderboard(); }); // roster + my ★ row
+        relay.on('stats', () => { if (netState.active) setReady(); relay.requestLeaderboard(); });  // totals moved after a game
         relay.on('room-closed', () => { netStatus('Room closed.'); leaveOnline(); });
         relay.on('reconnecting', () => netStatus(`${roomLine()} — reconnecting…`));
         relay.on('error', (m) => netStatus(`Error: ${m.error || 'unknown'}`));
@@ -294,6 +311,7 @@ if (!entry) {
         el('lobby').style.display = mode === 'online' ? '' : 'none';
         if (mode === 'online') {
           netStatus(onlineOk ? 'Create a room, or join with a code.' : 'Online isn’t available for this game yet.');
+          fetchLeaderboard(); // populate the top-players panel when the lobby opens
         } else {
           leaveOnline();
           controller.setMode(mode);

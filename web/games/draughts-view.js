@@ -7,7 +7,7 @@
 // matches the engine: row 0 at the top, row 7 at the bottom, so red naturally sits at the bottom
 // with no flipping needed.
 
-import { THEME, fitCanvas, pointerXY, animate, easeOut, think } from './board-common.js';
+import { THEME, fitCanvas, pointerXY, animate, easeOut, think, AI_PRE_MS, AI_POST_MS } from './board-common.js';
 import { createDraughts } from '../../src/board/draughts.js';
 
 const HUMAN = 'r';                 // human colour in 'ai' mode
@@ -290,18 +290,24 @@ export default function mount(ctx) {
     aiPending = true;
     refreshBanners();
     const myEpoch = epoch;
+    // Paced: a "thinking" beat (AI_PRE_MS) before the move, the slide, then a settle beat (AI_POST_MS,
+    // input stays locked via aiPending) before it's your move again.
     think(() => engine.aiMove(ctx.getDifficulty()), (move) => {
       if (destroyed || myEpoch !== epoch) return; // superseded by new game / undo
-      aiPending = false;
-      if (!move) { refreshBanners(); return; }
+      if (!move) { aiPending = false; refreshBanners(); return; }
       animateMove(move, () => {
         engine.move(move);
         lastMove = { from: move.from, to: move.path[move.path.length - 1] };
         draw();
         refreshBanners();
-        maybeAiTurn(); // in case the (human) opponent is somehow still not to move
+        setTimeout(() => {
+          if (destroyed || myEpoch !== epoch) return;
+          aiPending = false;
+          refreshBanners();
+          maybeAiTurn(); // in case the (human) opponent is somehow still not to move
+        }, AI_POST_MS);
       });
-    });
+    }, AI_PRE_MS);
   }
 
   // --- controller -----------------------------------------------------------------------------

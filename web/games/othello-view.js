@@ -5,7 +5,7 @@
 // replayed deterministically by each client's engine. Passes are handled inside the engine, so no
 // special "pass" plumbing is needed here.
 
-import { THEME, fitCanvas, pointerXY, think } from './board-common.js';
+import { THEME, fitCanvas, pointerXY, think, AI_PRE_MS, AI_POST_MS } from './board-common.js';
 import { createOthello } from '../../src/board/othello.js';
 
 const HUMAN = 'b';                          // human colour in AI mode (Black moves first)
@@ -149,16 +149,22 @@ export default function mount(ctx) {
     aiPending = true;
     refreshBanners();
     const myEpoch = epoch;
+    // Deliberate pacing: a "thinking" beat (AI_PRE_MS) before the disc lands, a settle beat (AI_POST_MS)
+    // after — so the flip is readable and back-to-back AI moves (an auto-passed human) don't race.
     think(() => engine.aiMove(ctx.getDifficulty()), (move) => {
       if (destroyed || myEpoch !== epoch) return;
-      aiPending = false;
-      if (!move) { refreshBanners(); return; }
+      if (!move) { aiPending = false; refreshBanners(); return; }
       engine.move(move);
       lastMove = move;
       draw();
       refreshBanners();
-      maybeAiTurn(); // the human may have been auto-passed → AI to move again
-    });
+      setTimeout(() => {
+        if (destroyed || myEpoch !== epoch) return;
+        aiPending = false;
+        refreshBanners();
+        maybeAiTurn(); // the human may have been auto-passed → AI to move again
+      }, AI_POST_MS);
+    }, AI_PRE_MS);
   }
 
   // --- controller -----------------------------------------------------------------------------

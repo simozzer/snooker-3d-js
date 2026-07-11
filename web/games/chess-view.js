@@ -7,7 +7,7 @@
 // the harness supplies the canvas, the measuring box, the status/turn/result banners and the mode/
 // difficulty getters; we return a small controller it can poke (newGame / undo / resize / destroy / …).
 
-import { THEME, fitCanvas, pointerXY, animate, easeOut, think } from './board-common.js';
+import { THEME, fitCanvas, pointerXY, animate, easeOut, think, AI_PRE_MS, AI_POST_MS } from './board-common.js';
 import { createChess } from '../../src/board/chess.js';
 
 // Solid (filled) chess glyphs for BOTH colours — we colour them ourselves rather than relying on the
@@ -250,13 +250,14 @@ export default function mount(ctx) {
     thinking = true;
     promptTurn(); // shows "AI is thinking…"
     const token = aiToken;
-    // think() defers the (synchronous) search so this move paints first and the prompt shows.
+    // Paced: a "thinking" beat (AI_PRE_MS) before the reply, then the slide, then a settle beat
+    // (AI_POST_MS, input stays locked via `thinking`) before it's your move again.
     think(() => engine.aiMove(difficulty), (m) => {
       if (token !== aiToken) return; // an undo / new game / mode change happened while we searched
-      thinking = false;
-      if (!m) { afterMove(); return; } // no legal move (mate/stalemate already handled by status)
-      applyMove(m);
-    });
+      if (!m) { thinking = false; afterMove(); return; } // no legal move (mate/stalemate handled by status)
+      applyMove(m); // animates the slide + runs afterMove(); `thinking` stays true to hold input
+      setTimeout(() => { if (token === aiToken) { thinking = false; promptTurn(); } }, AI_POST_MS);
+    }, AI_PRE_MS);
   }
 
   // ---------------------------------------------------------------------------------------------------

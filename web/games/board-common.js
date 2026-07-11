@@ -77,6 +77,13 @@ export function animate(tick) {
 }
 
 export const easeOut = (t) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
+export const easeIn = (t) => { const x = Math.min(1, Math.max(0, t)); return x * x; }; // gravity-ish accel
+
+// Deliberate pacing around an AI move so it never feels instant: a "thinking" beat BEFORE the reply
+// appears, and a settle beat AFTER it lands before control returns to the human. Shared by every
+// board view so all games slow down the same way.
+export const AI_PRE_MS = 500;
+export const AI_POST_MS = 420;
 
 // Run a (potentially heavy) synchronous AI search off the paint path: yields to the browser so the
 // human's move renders first and a "thinking…" state can show, then invokes cb with the result.

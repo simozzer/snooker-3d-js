@@ -3,7 +3,7 @@
 // Implements the optional ONLINE contract (onlineStart / setOnlineReady / applyRemoteMove /
 // onlineResync): a move is the column {col}, replayed deterministically by each client's engine.
 
-import { THEME, fitCanvas, pointerXY, think } from './board-common.js';
+import { THEME, fitCanvas, pointerXY, think, animate, easeIn, AI_PRE_MS, AI_POST_MS } from './board-common.js';
 import { createConnect4 } from '../../src/board/connect4.js';
 
 const COLS = 7, ROWS = 6;
@@ -25,6 +25,8 @@ export default function mount(ctx) {
   let geo = { w: 0, h: 0, cell: 60, ox: 0, oy: 0 };
   let lastMove = null;                 // {r,c} of the most recent drop (screen highlight)
   let hoverCol = -1;                   // column under the pointer (a drop-preview marker)
+  let anim = null;                     // { col, row, color, y } falling-disc overlay
+  let stopAnim = null;                 // canceller for the active drop animation
   let aiPending = false;
   let epoch = 0;
   let destroyed = false;
@@ -65,15 +67,40 @@ export default function mount(ctx) {
     const board = engine.board();
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
+        // The disc that's mid-drop hasn't landed yet — show its destination as an empty hole.
+        if (anim && anim.row === r && anim.col === c) { g.beginPath(); g.arc(colX(c), rowY(r), rad, 0, Math.PI * 2); g.fillStyle = HOLE; g.fill(); continue; }
         const p = board[r][c];
         if (p) drawDisc(g, colX(c), rowY(r), p, rad);
         else { g.beginPath(); g.arc(colX(c), rowY(r), rad, 0, Math.PI * 2); g.fillStyle = HOLE; g.fill(); }
       }
     }
-    if (lastMove) {
+    if (lastMove && !anim) {
       g.beginPath(); g.arc(colX(lastMove.c), rowY(lastMove.r), rad + 3, 0, Math.PI * 2);
       g.strokeStyle = THEME.lastMove; g.lineWidth = 3; g.stroke();
     }
+    if (anim) drawDisc(g, colX(anim.col), anim.y, anim.color, rad); // the falling coin, on top
+  }
+
+  // Drop a coin from above the board down its column to the resting row, then invoke done(). An
+  // accelerating fall (gravity) with a small bounce settle. The engine move is applied by the caller
+  // BEFORE this runs, so draw() already knows the final layout — it just hides the landed disc until
+  // the coin arrives. Single move per turn, so drops never overlap.
+  function animateDrop(row, col, color, done) {
+    if (stopAnim) { stopAnim(); stopAnim = null; }
+    const y0 = geo.oy - geo.cell * 0.5;   // start just above the frame
+    const y1 = rowY(row);
+    const dist = y1 - y0;
+    const DUR = Math.max(180, 120 + row * 42); // a longer fall for higher stacks
+    anim = { col, row, color, y: y0 };
+    stopAnim = animate((t) => {
+      const k = Math.min(1, t / DUR);
+      // accelerate down, then a quick 6% bounce as it seats
+      const e = k < 0.85 ? easeIn(k / 0.85) : 1 + Math.sin((k - 0.85) / 0.15 * Math.PI) * 0.06;
+      anim.y = y0 + dist * e;
+      if (k >= 1) { anim = null; stopAnim = null; draw(); done(); return false; }
+      draw();
+      return true;
+    });
   }
 
   function drawDisc(g, x, y, color, rad) {
@@ -122,23 +149,23 @@ export default function mount(ctx) {
 
   // --- input ----------------------------------------------------------------------------------
   function onPointerDown(ev) {
-    if (destroyed || aiPending || engine.status().over) return;
+    if (destroyed || aiPending || anim || engine.status().over) return;
     if (!isHumanTurn()) return;
     ev.preventDefault();
     const { x } = pointerXY(canvas, ev);
     const col = colAt(x);
     if (col < 0) return;
+    const color = engine.turn();
     const res = engine.move({ col });
     if (!res.ok) return;                        // full column — ignore
     lastMove = { r: res.row, c: col };
     hoverCol = -1;
-    draw();
     refreshBanners();
     if (isOnline()) ctx.net.send({ col }, seatForColour(engine.turn()));
-    else maybeAiTurn();
+    animateDrop(res.row, col, color, () => { if (!isOnline()) maybeAiTurn(); });
   }
   function onMove(ev) {
-    if (destroyed || engine.status().over || !isHumanTurn()) { if (hoverCol !== -1) { hoverCol = -1; draw(); } return; }
+    if (destroyed || anim || aiPending || engine.status().over || !isHumanTurn()) { if (hoverCol !== -1) { hoverCol = -1; draw(); } return; }
     const { x } = pointerXY(canvas, ev);
     const col = colAt(x);
     if (col !== hoverCol) { hoverCol = col; draw(); }
@@ -146,6 +173,8 @@ export default function mount(ctx) {
   function onLeave() { if (hoverCol !== -1) { hoverCol = -1; draw(); } }
 
   // --- AI -------------------------------------------------------------------------------------
+  // AI turn, deliberately paced: a "thinking" beat (AI_PRE_MS) before the coin appears, then the drop
+  // animation, then a settle beat (AI_POST_MS) before you're back on.
   function maybeAiTurn() {
     if (destroyed || !isAiMode() || isOnline()) return;
     if (engine.status().over || engine.turn() === HUMAN) return;
@@ -154,21 +183,28 @@ export default function mount(ctx) {
     const myEpoch = epoch;
     think(() => engine.aiMove(ctx.getDifficulty()), (move) => {
       if (destroyed || myEpoch !== epoch) return;
-      aiPending = false;
-      if (!move) { refreshBanners(); return; }
+      if (!move) { aiPending = false; refreshBanners(); return; }
+      const color = engine.turn();
       const res = engine.move(move);
       lastMove = { r: res.row, c: move.col };
-      draw();
       refreshBanners();
-    });
+      animateDrop(res.row, move.col, color, () => {
+        setTimeout(() => {
+          if (destroyed || myEpoch !== epoch) return;
+          aiPending = false;
+          refreshBanners();
+        }, AI_POST_MS);
+      });
+    }, AI_PRE_MS);
   }
 
   // --- controller -----------------------------------------------------------------------------
-  function startView() { lastMove = null; hoverCol = -1; aiPending = false; layout(); draw(); refreshBanners(); maybeAiTurn(); }
+  function cancelAnim() { if (stopAnim) { stopAnim(); stopAnim = null; } anim = null; }
+  function startView() { cancelAnim(); lastMove = null; hoverCol = -1; aiPending = false; layout(); draw(); refreshBanners(); maybeAiTurn(); }
   function newGame() { epoch++; onlineSeat = -1; engine.reset(); startView(); }
 
   function undo() {
-    if (isOnline() || aiPending) return;
+    if (isOnline() || aiPending || anim) return;
     if (!engine.history().length) return;
     epoch++;
     engine.undo();
@@ -192,19 +228,20 @@ export default function mount(ctx) {
     lastMove = last;
   }
   function onlineStart({ seat, log = [] }) {
-    epoch++; onlineSeat = seat; gameOverSent = false; aiPending = false;
+    epoch++; onlineSeat = seat; gameOverSent = false; aiPending = false; cancelAnim();
     engine.reset(); replayLog(log); layout(); draw(); refreshBanners();
   }
   function setOnlineReady() { refreshBanners(); }
   function applyRemoteMove(payload) {
     if (destroyed || !payload) return;
+    const color = engine.turn();
     const res = engine.move({ col: payload.col });
     if (!res.ok) return;
     lastMove = { r: res.row, c: payload.col };
-    draw();
     refreshBanners();
+    animateDrop(res.row, payload.col, color, () => {}); // watch the opponent's coin fall
   }
-  function onlineResync(log = []) { engine.reset(); replayLog(log); draw(); refreshBanners(); }
+  function onlineResync(log = []) { cancelAnim(); engine.reset(); replayLog(log); draw(); refreshBanners(); }
 
   // --- listeners ------------------------------------------------------------------------------
   canvas.addEventListener('mousedown', onPointerDown);
@@ -220,9 +257,9 @@ export default function mount(ctx) {
     setMode(mode) { if (mode !== 'online') newGame(); },
     setDifficulty() { /* applies on the AI's next search */ },
     undo,
-    resize() { layout(); draw(); },
+    resize() { cancelAnim(); layout(); draw(); },
     destroy() {
-      destroyed = true; epoch++;
+      destroyed = true; epoch++; cancelAnim();
       canvas.removeEventListener('mousedown', onPointerDown);
       canvas.removeEventListener('touchstart', onPointerDown);
       canvas.removeEventListener('mousemove', onMove);

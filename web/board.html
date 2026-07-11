@@ -18,7 +18,11 @@
       .hint { font-size: 11px; color: #6f8496; line-height: 1.4; }
       .ctl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
       .ctl > label { color: #a8b6c4; }
-      select { min-height: 34px; font-size: 14px; padding: 0 8px; border-radius: 8px; background: #222b34; color: #e8e8e8; border: 1px solid #3a4753; }
+      select, input { min-height: 34px; font-size: 14px; padding: 0 8px; border-radius: 8px; background: #222b34; color: #e8e8e8; border: 1px solid #3a4753; }
+      #net-code { flex: 1; min-width: 0; letter-spacing: 3px; text-transform: uppercase; font-weight: 700; text-align: center; }
+      #lobby .row { display: flex; gap: 6px; }
+      #net-status { min-height: 16px; }
+      #net-status b { color: #ffdf6b; letter-spacing: 3px; font-size: 15px; }
       button { padding: 9px 12px; font-size: 14px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; background: #2e7d5b; color: #fff; }
       button:disabled { opacity: 0.5; cursor: default; }
       button.sec { background: #33404c; }
@@ -43,6 +47,16 @@
       #err a { color: #54c98a; }
       #version { position: fixed; top: 10px; left: 12px; z-index: 50; pointer-events: none; user-select: none;
         font: 600 12px/1 system-ui, sans-serif; letter-spacing: .5px; color: #6f8496; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+      /* relay reachability — small, bottom-left; only shown in online mode */
+      #netstat { position: fixed; bottom: 10px; left: 12px; z-index: 50; display: none; align-items: center; gap: 6px;
+        pointer-events: none; user-select: none; font: 600 11px/1 system-ui, sans-serif; letter-spacing: .3px; color: #8fa3b5;
+        text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+      #netstat.show { display: flex; }
+      #netstat .dot { width: 8px; height: 8px; border-radius: 50%; background: #6f8496; }
+      #netstat.online .dot { background: #54c98a; }
+      #netstat.connecting .dot { background: #ffcf5b; animation: netpulse 1s ease-in-out infinite; }
+      #netstat.offline .dot { background: #e23b3b; }
+      @keyframes netpulse { 50% { opacity: .3; } }
 
       @media (pointer: coarse) {
         button { padding: 13px 14px; font-size: 15px; border-radius: 10px; }
@@ -57,6 +71,7 @@
   </head>
   <body>
     <div id="version"></div>
+    <div id="netstat"><span class="dot"></span><span id="netstat-label">Server</span></div>
     <div id="app">
       <div id="view">
         <canvas id="board" width="480" height="480"></canvas>
@@ -65,12 +80,18 @@
       <div id="panel">
         <a class="back" href="../index.html">← All games</a>
         <h1 id="gametitle">Board game</h1>
+        <div class="ctl" id="authbar" style="display:none;">
+          <div id="userchip" class="hint">Not signed in</div>
+          <button id="login">Log in</button>
+          <button id="logout" class="sec" style="display:none;">Log out</button>
+        </div>
         <div id="result"></div>
         <div id="turn"></div>
         <div class="ctl"><label>Opponent</label>
           <select id="mode">
             <option value="ai" selected>You vs AI</option>
             <option value="human">Two players (hot-seat)</option>
+            <option value="online">Play online</option>
           </select>
         </div>
         <div class="ctl" id="row-difficulty"><label>AI difficulty</label>
@@ -79,6 +100,14 @@
             <option value="medium" selected>Medium</option>
             <option value="hard">Hard</option>
           </select>
+        </div>
+        <div class="ctl" id="lobby" style="display:none;"><label>Online game</label>
+          <button id="net-create">Create room</button>
+          <div class="row">
+            <input id="net-code" placeholder="CODE" maxlength="4" autocomplete="off" spellcheck="false" />
+            <button id="net-join" class="sec">Join</button>
+          </div>
+          <div id="net-status" class="hint"></div>
         </div>
         <div id="gamecontrols"></div>
         <button id="newgame">New game</button>

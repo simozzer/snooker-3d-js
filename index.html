@@ -43,10 +43,30 @@
       footer a { color: #7fb0d8; }
       #version { position: fixed; top: 10px; left: 12px; z-index: 50; pointer-events: none; user-select: none;
         font: 600 12px/1 system-ui, sans-serif; letter-spacing: .5px; color: #6f8496; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+      /* multiplayer reachability light (bottom-left, matches the game pages) */
+      #netstat { position: fixed; bottom: 10px; left: 12px; z-index: 50; display: none; align-items: center; gap: 6px;
+        pointer-events: none; user-select: none; font: 600 11px/1 system-ui, sans-serif; color: #8fa3b5; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+      #netstat.show { display: flex; }
+      #netstat .dot { width: 8px; height: 8px; border-radius: 50%; background: #6f8496; }
+      #netstat.online .dot { background: #54c98a; }
+      #netstat.connecting .dot { background: #ffcf5b; animation: netpulse 1s ease-in-out infinite; }
+      #netstat.offline .dot { background: #e23b3b; }
+      @keyframes netpulse { 50% { opacity: .3; } }
+      /* optional login (top-right) */
+      #authbar { position: fixed; top: 10px; right: 14px; z-index: 50; display: flex; align-items: center; gap: 8px;
+        font: 600 12px/1 system-ui, sans-serif; color: #9fb4c7; }
+      #authbar button { font: 600 12px system-ui, sans-serif; padding: 6px 12px; border: 0; border-radius: 8px; cursor: pointer; background: #2e7d5b; color: #fff; }
+      #authbar button.sec { background: #33404c; color: #cfe0ee; }
     </style>
   </head>
   <body>
     <div id="version"></div>
+    <div id="authbar" style="display:none;">
+      <span id="userchip">Playing offline</span>
+      <button id="login">Log in</button>
+      <button id="logout" class="sec" style="display:none;">Log out</button>
+    </div>
+    <div id="netstat"><span class="dot"></span><span id="netstat-label">Server</span></div>
     <div class="bg" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
     <header>
       <h1>Games <span class="dot">·</span> Compendium</h1>
@@ -98,9 +118,6 @@
       </div>
     </main>
     <footer>Deterministic engines, no network needed. <a href="web/render3d.html">Open the 3D table →</a></footer>
-    <script type="module">
-      import { VERSION } from './web/version.js';
-      document.getElementById('version').textContent = `v${VERSION}`;
-    </script>
+    <script type="module" src="./web/home.js"></script>
   </body>
 </html>

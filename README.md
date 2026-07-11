@@ -51,7 +51,7 @@ velocity + retained spin, the next slide phase produces the screw/follow on its 
 
 ```sh
 npm test          # node --test — physics, geometry, rules, game, AI
-npm run serve     # static server; then open http://localhost:8080/web/
+npm run serve     # static server; then open http://localhost:8123/web/
 ```
 
 In the browser: **drag on the table** to aim, set **power**, drag the **spin dot** (up =

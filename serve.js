@@ -1,13 +1,13 @@
 // serve.js — zero-dependency static file server for local dev.
-//   node serve.js [port]   (default 8080)
-// Serve from the PROJECT ROOT, then open http://localhost:8080/web/ — the ES module
-// imports reach ../src/*, so the web app must be served above the project root.
+//   node serve.js [port]   (default 8123)
+// Serve from the PROJECT ROOT, then open http://localhost:8123/ — the root is the games compendium
+// home; each game page lives under /web/ and its ES module imports reach ../src/*.
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, normalize, join } from 'node:path';
 
-const port = Number(process.argv[2]) || 8080;
+const port = Number(process.argv[2]) || 8123;
 const root = process.cwd();
 
 const TYPES = {
@@ -22,9 +22,9 @@ const TYPES = {
 };
 
 const server = createServer(async (req, res) => {
-  // strip query/hash, default to /web/, prevent path-traversal above the root
+  // strip query/hash, land the bare root on the compendium home, prevent path-traversal above the root
   let pathname = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
-  if (pathname === '/') pathname = '/web/';
+  if (pathname === '/') pathname = '/index.html';
   if (pathname.endsWith('/')) pathname += 'index.html';
   const filePath = normalize(join(root, pathname));
   if (!filePath.startsWith(root)) {

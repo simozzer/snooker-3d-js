@@ -77,9 +77,13 @@
       @media (prefers-reduced-motion: reduce) {
         .bg-aurora .blob { animation: none; }
       }
+      #backlink { position: fixed; top: 10px; left: 12px; z-index: 50; font: 600 12px/1 system-ui, sans-serif;
+        color: #7fb0d8; text-decoration: none; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+      #backlink:hover { text-decoration: underline; }
     </style>
   </head>
   <body>
+    <a id="backlink" href="../index.html">← All games</a>
     <div class="bg-aurora" aria-hidden="true">
       <span class="blob blob-1"></span>
       <span class="blob blob-2"></span>

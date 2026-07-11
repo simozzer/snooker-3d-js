@@ -60,6 +60,24 @@ export class Rooms {
     return room ? [...room.players.keys()] : [];
   }
 
+  // Summary the transport uses to validate a completed game before tallying stats: how many moves
+  // were made, which distinct seats actually moved, the participants (pid+seat) so the transport can
+  // resolve their identities, and whether this room was already counted. Null if the room is gone.
+  playSummary(code) {
+    const room = this.rooms.get(code);
+    if (!room) return null;
+    const moves = room.log.filter((e) => e.kind === 'move');
+    return {
+      moves: moves.length,
+      movers: [...new Set(moves.map((e) => e.seat))],
+      participants: [...room.players.values()].map((p) => ({ pid: p.pid, seat: p.seat })),
+      counted: room.counted,
+    };
+  }
+
+  // Mark a room's game as tallied so it can't be double-counted (idempotent).
+  markCounted(code) { const room = this.rooms.get(code); if (room) room.counted = true; }
+
   // A serialisable view of the seats — what a joiner/resumer needs to render the lobby.
   _players(room) {
     return [...room.players.values()]
@@ -89,6 +107,7 @@ export class Rooms {
       seed: this._randomU32(),
       turn: 0,          // seat 0 (the creator) moves first
       seq: 0,           // monotonic log sequence number
+      counted: false,   // has a completed game here already been tallied into stats?
       log: [],          // ordered [{ seq, seat, kind:'move'|'random', payload?/value? }]
       players: new Map([[pid, { pid, seat: 0, name, connected: true }]]),
       createdAt: this._now(),

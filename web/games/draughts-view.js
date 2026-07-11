@@ -33,6 +33,7 @@ export default function mount(ctx) {
   let epoch = 0;                   // bumped on new game / undo / destroy to void stale AI callbacks
   let destroyed = false;
   let onlineSeat = -1;             // our seat (0/1) in an online game, or -1 when offline
+  let gameOverSent = false;        // ensure we report a finished online game to the relay only once
 
   // --- geometry -------------------------------------------------------------------------------
   function layout() {
@@ -143,6 +144,10 @@ export default function mount(ctx) {
     const s = engine.status();
     ui.setUndo(!isOnline() && engine.history().length > 0 && !aiPending); // no unilateral undo online
     if (s.over) {
+      if (isOnline() && !gameOverSent) { // tally the finished game once (draw → null winner)
+        gameOverSent = true;
+        ctx.net.sendGameOver(s.result === 'draw' ? null : seatForColour(s.winner));
+      }
       ui.turn(null);
       ui.result(s.result === 'draw' ? 'Draw' : `${colorName[s.winner]} wins`);
       ui.status(s.result === 'draw' ? 'Drawn game.' : `${colorName[s.winner]} wins — ${s.reason}.`);
@@ -356,6 +361,7 @@ export default function mount(ctx) {
   function onlineStart({ seat, log = [] }) {
     epoch++;
     onlineSeat = seat;
+    gameOverSent = false;
     aiPending = false;
     if (anim) { anim(); anim = null; }
     clearSelection();

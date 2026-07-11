@@ -31,6 +31,8 @@ export class RelayClient {
     this.code = null;       // current room code (set on create/join)
     this.seat = -1;         // our seat in the room, or -1
     this.token = null;      // optional OIDC token; re-sent on every (re)connect so identity survives drops
+    this.games = 0;         // this player's running totals (from the relay, once authenticated)
+    this.wins = 0;
     this._handlers = new Map();
     this._pending = null;   // an in-flight request-response { okTypes, resolve, reject }
     this._closedByUs = false;
@@ -97,6 +99,11 @@ export class RelayClient {
     if (m.type === 'created' || m.type === 'joined' || m.type === 'resumed') {
       this.code = m.code; this.seat = m.seat;
     }
+    // Track our running totals (relay greets us with them on auth, updates them after each game).
+    if (m.type === 'authed' || m.type === 'stats') {
+      if (typeof m.games === 'number') this.games = m.games;
+      if (typeof m.wins === 'number') this.wins = m.wins;
+    }
     this._emit(m.type, m);
   }
 
@@ -122,6 +129,8 @@ export class RelayClient {
   // turn passes to; omit to hand off round-robin (fine for 2-player alternating games).
   sendMove(payload, next) { this._raw({ type: 'move', code: this.code, payload, next }); }
   requestRandom() { this._raw({ type: 'random', code: this.code }); }
+  // Report a finished game so the relay tallies stats. `winner` is the winning seat, or null for a draw.
+  sendGameOver(winner) { this._raw({ type: 'game-over', code: this.code, winner }); }
   leave() { this._raw({ type: 'leave', code: this.code }); this.code = null; this.seat = -1; }
 
   close() { this._closedByUs = true; try { this.ws?.close(); } catch { /* already gone */ } }

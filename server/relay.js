@@ -11,12 +11,26 @@
 
 import { WebSocketServer } from 'ws';
 import { randomUUID } from 'node:crypto';
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
 import { Rooms } from './rooms.js';
 import { verifierFromEnv } from './auth.js';
+import { Stats } from './stats.js';
 
 const PORT = Number(process.argv[2] ?? process.env.PORT ?? 8090);
 const HEARTBEAT_MS = 30_000;   // ping every 30s; a socket that misses a pong is dead
 const SWEEP_MS = 60_000;       // reap idle rooms once a minute
+const MIN_MOVES = 2;           // a game must have at least this many moves before it counts in stats
+
+// Per-player stats (games/wins), persisted as JSON. Keyed by OIDC sub, so only logged-in players count.
+const DATA_DIR = process.env.DATA_DIR || './data';
+const STATS_FILE = join(DATA_DIR, 'stats.json');
+const loadStats = () => { try { return JSON.parse(readFileSync(STATS_FILE, 'utf8')); } catch { return {}; } };
+const persistStats = (snap) => {
+  try { mkdirSync(DATA_DIR, { recursive: true }); const tmp = `${STATS_FILE}.tmp`; writeFileSync(tmp, JSON.stringify(snap)); renameSync(tmp, STATS_FILE); }
+  catch (e) { console.error('stats persist failed:', e.message); }
+};
+const stats = new Stats({ initial: loadStats(), persist: persistStats });
 
 // Optional OIDC identity (see auth.js). Disabled unless OIDC_ISSUER is set, so dev/tests are anonymous.
 // REQUIRE_AUTH makes a verified token mandatory to create/join a room.
@@ -71,12 +85,30 @@ wss.on('connection', (ws) => {
       case 'auth':
         try {
           ws.identity = await verifier.verify(m.token);
-          send(ws, { type: 'authed', name: ws.identity?.name ?? null, sub: ws.identity?.sub ?? null });
+          const st = stats.get(ws.identity?.sub); // greet the player with their running totals
+          send(ws, { type: 'authed', name: ws.identity?.name ?? null, sub: ws.identity?.sub ?? null, games: st.games, wins: st.wins });
         } catch {
           ws.identity = null;
           send(ws, { type: 'error', error: 'auth-failed' });
         }
         break;
+      case 'game-over': {
+        // Tally a finished game — but only a REAL one: both seats moved, enough moves, once per room.
+        // Anonymous participants simply aren't recorded (no identity). Clients report this; the guards
+        // mean gaming the count requires actually playing real games against a real opponent.
+        const goCode = up(m.code);
+        const sum = rooms.playSummary(goCode);
+        if (!sum || sum.counted || sum.movers.length < 2 || sum.moves < MIN_MOVES) break;
+        rooms.markCounted(goCode);
+        const winner = Number.isInteger(m.winner) ? m.winner : null;
+        for (const part of sum.participants) {
+          const w = sockets.get(part.pid);
+          if (!w?.identity?.sub) continue;
+          const rec = stats.recordGame(w.identity.sub, w.identity.name, winner !== null && part.seat === winner);
+          send(w, { type: 'stats', games: rec.games, wins: rec.wins });
+        }
+        break;
+      }
       case 'create':
         if (!guard()) break;
         dispatch(ws, pid, rooms.create({ pid, game: m.game, seats: m.seats, name: trustedName(m.name) }));
@@ -139,7 +171,13 @@ wss.on('close', () => { clearInterval(heartbeat); clearInterval(sweeper); });
 
 console.log(`relay listening on ws://0.0.0.0:${PORT}`);
 
-// Clean shutdown for containers (SIGTERM from k8s) and Ctrl+C.
+// Clean, PROMPT shutdown (systemd/k8s SIGTERM, Ctrl+C). Terminate live sockets so wss.close resolves
+// immediately instead of waiting for idle clients to drop, with a hard-stop fallback.
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => { console.log(`\n${sig} — closing relay`); wss.close(() => process.exit(0)); });
+  process.on(sig, () => {
+    console.log(`\n${sig} — closing relay`);
+    for (const ws of wss.clients) { try { ws.terminate(); } catch { /* already gone */ } }
+    wss.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 1500).unref();
+  });
 }

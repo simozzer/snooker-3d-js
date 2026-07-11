@@ -135,6 +135,25 @@ test('leave frees the seat; the last player leaving closes the room', () => {
   assert.equal(r.get('TEST'), null);
 });
 
+test('playSummary reports moves/movers/participants and markCounted is once-only', () => {
+  const r = makeRooms();
+  r.create({ pid: 'host', game: 'draughts' });
+  r.join({ pid: 'guest', code: 'TEST' });
+  r.move({ pid: 'host', code: 'TEST', payload: { n: 1 } }); // seat 0
+  r.move({ pid: 'guest', code: 'TEST', payload: { n: 2 } }); // seat 1
+  r.random({ pid: 'host', code: 'TEST' }); // not a move — excluded from the move tally
+
+  const sum = r.playSummary('TEST');
+  assert.equal(sum.moves, 2);
+  assert.deepEqual(sum.movers.sort(), [0, 1]);
+  assert.equal(sum.participants.length, 2);
+  assert.equal(sum.counted, false);
+
+  r.markCounted('TEST');
+  assert.equal(r.playSummary('TEST').counted, true);
+  assert.equal(r.playSummary('NOPE'), null);
+});
+
 test('sweep reaps rooms idle past the TTL', () => {
   const r = makeRooms();               // ttl 5000ms, clock +1000 per touch
   r.create({ pid: 'host', game: 'draughts' }); // touches move the clock forward

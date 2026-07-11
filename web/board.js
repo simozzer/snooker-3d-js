@@ -108,6 +108,8 @@ if (!entry) {
       seat: () => netState.relay?.seat ?? -1,
       send: (payload, next) => netState.relay?.sendMove(payload, next),
       requestRandom: () => netState.relay?.requestRandom(),
+      sendGameOver: (winner) => netState.relay?.sendGameOver(winner),
+      games: () => netState.relay?.games ?? 0,
     },
   };
 
@@ -185,8 +187,10 @@ if (!entry) {
       // to "Player N". A ★ marks you.
       function playerRoster() {
         const mySeat = netState.relay?.seat;
+        const myGames = netState.relay?.games || 0;
         return (netState.players || []).slice().sort((a, b) => a.seat - b.seat)
-          .map((p) => `${p.seat === mySeat ? '★ ' : ''}${p.name || `Player ${p.seat + 1}`}${p.connected ? '' : ' (away)'}`)
+          .map((p) => `${p.seat === mySeat ? '★ ' : ''}${p.name || `Player ${p.seat + 1}`}`
+            + `${p.seat === mySeat && myGames ? ` · ${myGames} games` : ''}${p.connected ? '' : ' (away)'}`)
           .join(' &nbsp;vs&nbsp; ');
       }
       function setReady(players) {
@@ -220,6 +224,8 @@ if (!entry) {
         relay.on('peer-reconnected', (m) => setReady(m.players));
         relay.on('peer-left', (m) => { if (m.players) netState.players = m.players; netState.ready = false; controller.setOnlineReady?.(false); netStatus(`${roomLine()} — opponent disconnected, waiting…<br>${playerRoster()}`); });
         relay.on('resumed', (m) => { controller.onlineResync?.(m.log); setReady(m.players); });
+        relay.on('authed', () => { if (netState.active) setReady(); }); // refresh roster with my games count
+        relay.on('stats', () => { if (netState.active) setReady(); });  // updated totals after a game
         relay.on('room-closed', () => { netStatus('Room closed.'); leaveOnline(); });
         relay.on('reconnecting', () => netStatus(`${roomLine()} — reconnecting…`));
         relay.on('error', (m) => netStatus(`Error: ${m.error || 'unknown'}`));

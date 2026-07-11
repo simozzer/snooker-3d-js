@@ -8,6 +8,8 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
@@ -46,7 +48,8 @@ before(async () => {
 
   relay = spawn(process.execPath, [RELAY, String(RELAY_PORT)], {
     stdio: ['ignore', 'pipe', 'inherit'],
-    env: { ...process.env, OIDC_ISSUER: ISSUER, OIDC_AUDIENCE: AUDIENCE, OIDC_JWKS_URI: `http://127.0.0.1:${JWKS_PORT}/certs`, REQUIRE_AUTH: '1' },
+    env: { ...process.env, OIDC_ISSUER: ISSUER, OIDC_AUDIENCE: AUDIENCE, OIDC_JWKS_URI: `http://127.0.0.1:${JWKS_PORT}/certs`, REQUIRE_AUTH: '1',
+      DATA_DIR: mkdtempSync(join(tmpdir(), 'relay-stats-')) }, // isolate stats file from the repo
   });
   await new Promise((resolve, reject) => {
     const to = setTimeout(() => reject(new Error('relay did not start')), 5000);
@@ -99,4 +102,32 @@ test('the verified name is used as the player name (not a client-supplied one)',
   const host = joined.players.find((p) => p.seat === 0);
   assert.equal(host.name, 'Real Name');
   c.close(); g.close();
+});
+
+test('a finished game is tallied per authenticated player (win/loss)', async () => {
+  const host = new RelayClient({ url, autoReconnect: false }); await host.connect();
+  const ha = await host.authenticate(await sign({ name: 'Ada', sub: 'ada-stats' }));
+  assert.equal(ha.games, 0); // fresh identity greeted with zero totals
+  const created = await host.create({ game: 'draughts' });
+
+  const guest = new RelayClient({ url, autoReconnect: false }); await guest.connect();
+  await guest.authenticate(await sign({ name: 'Bob', sub: 'bob-stats' }));
+  const jp = guest.join(created.code);
+  await waitFor(host, 'peer-joined'); await jp;
+
+  // Two real moves (both seats) so the game qualifies to be counted.
+  host.sendMove({ n: 1 }, 1); await waitFor(guest, 'move');
+  guest.sendMove({ n: 2 }, 0); await waitFor(host, 'move');
+
+  const hostStats = waitFor(host, 'stats'); const guestStats = waitFor(guest, 'stats');
+  host.sendGameOver(0); // seat 0 (Ada) wins
+  const hs = await hostStats, gs = await guestStats;
+  assert.deepEqual({ games: hs.games, wins: hs.wins }, { games: 1, wins: 1 }, 'winner: 1 game, 1 win');
+  assert.deepEqual({ games: gs.games, wins: gs.wins }, { games: 1, wins: 0 }, 'loser: 1 game, 0 wins');
+
+  // A second game-over for the same room must NOT double-count.
+  host.sendGameOver(0);
+  const reAuth = await host.authenticate(await sign({ name: 'Ada', sub: 'ada-stats' }));
+  assert.equal(reAuth.games, 1, 'still 1 game — room counted only once');
+  host.close(); guest.close();
 });

@@ -23,6 +23,19 @@ const CHK_B = '#2b333b';       // black = dark slate
 const CHK_B_EDGE = '#151b21';
 const LABEL = '#e8e8e8';
 
+// Online seat ↔ colour: seat 0 (the room creator) is White and rolls first, matching the relay's
+// turn-0-first rule and the engine's white-to-start. Seat 1 is Black.
+const COLOUR_FOR_SEAT = ['w', 'b'];
+const seatForColour = (c) => (c === 'w' ? 0 : 1);
+
+// Derive two dice (1..6) from the relay's ONE authoritative uint32 so BOTH clients roll the identical
+// pair — the whole reason the relay owns randomness. Modulo-6 bias on a 32-bit value is negligible for
+// dice. Exported so the online tests derive rolls exactly as the view does (single source of truth).
+export function diceFromU32(v) {
+  const u = v >>> 0;
+  return [(u % 6) + 1, (Math.floor(u / 6) % 6) + 1];
+}
+
 export default function mount(ctx) {
   const { canvas, box, gameControls, ui } = ctx;
   const engine = createBackgammon();
@@ -38,6 +51,13 @@ export default function mount(ctx) {
   let stopAnim = null;               // active animation canceller
   let lastMove = null;               // {from,to} for a subtle highlight
   let anim = null;                   // {from,to,color,t} sliding checker overlay
+  let onlineSeat = -1;               // our seat (0/1) in an online game, or -1 when offline
+  let gameOverSent = false;          // report a finished online game to the relay only once
+
+  // Online helpers. isOnline() gates every AI/local-only path; myColour()/otherSeat() map our seat.
+  const isOnline = () => onlineSeat >= 0 && !!ctx.net?.isOnline();
+  const myColour = () => COLOUR_FOR_SEAT[onlineSeat];
+  const otherSeat = () => (onlineSeat === 0 ? 1 : 0);
 
   // Geometry is recomputed on every resize into this object.
   let geo = null;
@@ -408,10 +428,25 @@ export default function mount(ctx) {
       ui.status(status.reason);
       rollBtn.disabled = true;
       ui.setUndo(false);
+      if (isOnline() && !gameOverSent) { // tally once; both clients report, the relay dedupes per room
+        gameOverSent = true;
+        ctx.net.sendGameOver(seatForColour(status.winner)); // backgammon always has a winner (no draws)
+      }
       return;
     }
     ui.result(null);
     const who = turn === 'w' ? 'White' : 'Black';
+
+    if (isOnline()) {
+      if (!ctx.net.isReady()) { ui.turn('Waiting for opponent…'); ui.status(`You are ${myColour() === 'w' ? 'White' : 'Black'}.`); rollBtn.disabled = true; ui.setUndo(false); return; }
+      const mine = turn === myColour();
+      if (mine) ui.turn(st.rolled ? `Your move — ${who}` : `Your roll — ${who}`);
+      else ui.turn(st.rolled ? `Opponent moving — ${who}` : `Opponent to roll — ${who}`);
+      rollBtn.disabled = !mine || st.rolled || busy;
+      ui.setUndo(false); // no unilateral take-backs online
+      return;
+    }
+
     const humanTurn = mode === 'human' || turn === HUMAN;
     const aiTurn = mode === 'ai' && turn !== HUMAN;
 
@@ -434,6 +469,14 @@ export default function mount(ctx) {
     if (busy || over) return;
     const st = engine.state();
     if (st.rolled) return;
+    if (isOnline()) {
+      // Don't roll locally: ask the relay for ONE authoritative value that both clients consume via
+      // applyRemoteRandom. Guard so only the turn-holder rolls, and only once.
+      if (!ctx.net.isReady() || engine.turn() !== myColour()) return;
+      rollBtn.disabled = true;
+      ctx.net.requestRandom();
+      return;
+    }
     const r = engine.roll();
     selected = null; legalTargets = [];
     if (!r.canMove) {
@@ -471,7 +514,7 @@ export default function mount(ctx) {
   }
 
   function maybeRunAI() {
-    if (over) return;
+    if (over || isOnline()) return; // online play never runs a local AI — the opponent is a real peer
     const turn = engine.turn();
     if (!(mode === 'ai' && turn !== HUMAN)) return;
     busy = true;
@@ -531,7 +574,8 @@ export default function mount(ctx) {
   function onDown(ev) {
     if (busy || over) return;
     const turn = engine.turn();
-    if (mode === 'ai' && turn !== HUMAN) return;
+    if (isOnline()) { if (!ctx.net.isReady() || turn !== myColour() || anim) return; } // one move at a time
+    else if (mode === 'ai' && turn !== HUMAN) return;
     const st = engine.state();
     if (!st.rolled) { ui.status('Roll the dice first.'); return; }
     ev.preventDefault();
@@ -571,6 +615,12 @@ export default function mount(ctx) {
       const res = engine.move(target);
       selected = null; legalTargets = [];
       if (res.hit) ui.status('Hit! An opponent checker goes to the bar.');
+      if (isOnline()) {
+        // Relay just {from,to}; the peer re-derives the die/hit/bear-off from its own legal list. Hand
+        // the turn to the opponent only when this move completes it (no dice left, or no legal play).
+        const complete = engine.state().movesLeft.length === 0 || !engine.canMove();
+        ctx.net.send({ from: target.from, to: target.to }, complete ? otherSeat() : onlineSeat);
+      }
       draw();
       settleAfterMove();
     });
@@ -603,14 +653,103 @@ export default function mount(ctx) {
   }
 
   function newGame() {
+    onlineSeat = -1; // a fresh local game leaves online play
     engine.reset();
     initView('White to start — roll the dice.');
   }
 
+  // ---- online play (optional harness contract; see web/board.js + web/net.js) -----------------
+  // Replay the ordered move-log (rolls AND checker moves) to reach the live position. Rolls set the
+  // dice from the shared uint32; each checker move is re-matched against the engine's own legal list,
+  // so a peer can never inject an illegal state. A turn ends exactly when the engine is out of legal
+  // play — the same rule live settling uses — so this reproduces mid-turn state faithfully. A `pass`
+  // entry is the explicit hand-off a rolled-but-stuck player sends (a roll alone can't change turn).
+  function replayLog(log = []) {
+    for (const e of log) {
+      if (e.kind === 'random') {
+        const [d1, d2] = diceFromU32(e.value);
+        engine.roll(d1, d2);
+      } else if (e.kind === 'move' && e.payload) {
+        if (e.payload.pass) { engine.endTurn(); continue; }
+        const res = engine.move({ from: e.payload.from, to: e.payload.to });
+        if (!res.ok) continue;
+        lastMove = { from: e.payload.from, to: e.payload.to };
+        if (engine.state().movesLeft.length === 0 || !engine.canMove()) engine.endTurn();
+      }
+    }
+  }
+
+  // Enter online play at our seat: fresh engine, replay any existing log (a mid-game join hands us a
+  // populated one), then paint. onlineSeat gates input/rolls to our colour's turns.
+  function onlineStart({ seat, log = [] }) {
+    onlineSeat = seat;
+    gameOverSent = false;
+    over = false; busy = false; selected = null; legalTargets = []; lastMove = null; anim = null;
+    if (stopAnim) { stopAnim(); stopAnim = null; }
+    engine.reset();
+    replayLog(log);
+    layout();
+    ui.result(null);
+    draw();
+    refreshUI();
+  }
+
+  function setOnlineReady() { draw(); refreshUI(); } // ready-state changed → repaint banners/gating
+
+  // Full re-sync (reconnect or mid-game join): rebuild the position from the authoritative log.
+  function onlineResync(log = []) {
+    over = false; busy = false; selected = null; legalTargets = []; lastMove = null; anim = null;
+    if (stopAnim) { stopAnim(); stopAnim = null; }
+    engine.reset();
+    replayLog(log);
+    draw();
+    refreshUI();
+  }
+
+  // An authoritative roll arrived (ours or the peer's). Both clients apply the identical dice. If the
+  // roll has no legal play the turn must be handed off explicitly — the roller sends a `pass` move.
+  function applyRemoteRandom(value, seat) {
+    if (over) return;
+    const [d1, d2] = diceFromU32(value);
+    const r = engine.roll(d1, d2);
+    selected = null; legalTargets = []; lastMove = null;
+    const who = engine.turn() === 'w' ? 'White' : 'Black';
+    draw();
+    if (!r.canMove) {
+      ui.status(`${who} rolled ${d1}-${d2} — no legal move.`);
+      if (seat === onlineSeat) { ctx.net.send({ pass: true }, otherSeat()); engine.endTurn(); afterTurnChange(); }
+      else refreshUI(); // wait for the roller's pass to advance the turn
+      return;
+    }
+    ui.status(`Rolled ${d1}-${d2}.`);
+    refreshUI();
+  }
+
+  // Apply a peer's checker move or their explicit pass. Applied SYNCHRONOUSLY in arrival order (no
+  // slide) on purpose: a turn relays several moves back-to-back, and an animation whose engine.move
+  // ran in a done-callback would be cancelled by the next arrival before it applied — silently
+  // dropping a checker. engine.move validates against its own legal list, so a desynced/illegal
+  // payload is ignored rather than corrupting the board. The last move keeps its highlight ring.
+  function applyRemoteMove(payload) {
+    if (over || !payload) return;
+    if (payload.pass) { engine.endTurn(); afterTurnChange(); return; }
+    const res = engine.move({ from: payload.from, to: payload.to });
+    if (!res.ok) { draw(); refreshUI(); return; }
+    lastMove = { from: payload.from, to: payload.to };
+    selected = null; legalTargets = [];
+    draw();
+    settleAfterMove();
+  }
+
   return {
     newGame,
-    setMode(m) { mode = m; newGame(); },
+    setMode(m) { mode = m; if (m !== 'online') newGame(); }, // online games start via onlineStart
     setDifficulty(l) { difficulty = l; },
+    onlineStart,
+    setOnlineReady,
+    applyRemoteMove,
+    applyRemoteRandom,
+    onlineResync,
 
     // ---- shareable position links (optional controller methods used by board.js) ----
     // Encode the current position for a ?state= link. Always returns a token (the opening position is
@@ -629,7 +768,7 @@ export default function mount(ctx) {
     },
 
     undo() {
-      if (busy || over) return;
+      if (busy || over || isOnline()) return; // a networked game can't be unilaterally taken back
       if (mode === 'ai' && engine.turn() !== HUMAN) return;
       if (engine.undo()) {
         selected = null; legalTargets = []; lastMove = null;

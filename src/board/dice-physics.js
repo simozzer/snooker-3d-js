@@ -223,7 +223,24 @@ export function createDiceSim(userOpts = {}) {
     applyImpulse(b, rb, J);
   }
 
-  function step(dice, dt) {
+  // A moving die bouncing off a STATIC resting die (an obstacle), so a re-rolled cocked die can't land
+  // overlapping the dice that already settled. Sphere-based like resolvePair, but only the mover moves.
+  function resolveObstacle(a, ob) {
+    const dvec = vsub(ob.p, a.p);
+    const dist = vlen(dvec);
+    const min = 2 * rBall;
+    if (dist >= min || dist < 1e-9) return;
+    const n = vscale(dvec, 1 / dist);      // points from the mover toward the obstacle
+    a.p = vsub(a.p, vscale(n, min - dist)); // push the mover fully clear
+    const ra = vscale(n, rBall);
+    const vn = vdot(vadd(a.v, vcross(a.w, ra)), n);
+    if (vn >= 0) return;                     // already separating
+    const rna = vcross(ra, n);
+    const jn = -(1 + o.restitution) * vn / (invM + invI * vdot(rna, rna));
+    applyImpulse(a, ra, vscale(n, -jn));     // reaction shoves the mover away from the obstacle
+  }
+
+  function step(dice, dt, obstacles) {
     // 1) gravity
     for (const d of dice) d.v = vadd(d.v, V(0, -o.gravity * dt, 0));
     // 2) contacts (a few sequential-impulse iterations for stability)
@@ -238,6 +255,7 @@ export function createDiceSim(userOpts = {}) {
       }
       for (let i = 0; i < dice.length; i++)
         for (let j = i + 1; j < dice.length; j++) resolvePair(dice[i], dice[j]);
+      if (obstacles.length) for (const d of dice) for (const ob of obstacles) resolveObstacle(d, ob);
     }
     // 3) integrate + light damping
     for (const d of dice) {
@@ -297,9 +315,11 @@ export function createDiceSim(userOpts = {}) {
     size: S,
     tray: o.tray,
     faces: FACES,
-    // Run a full throw. Returns { values, frames, steps }. `frames` is an array of samples; each
-    // sample is an array of { p:{x,y,z}, q:{x,y,z,w} } — one per die — at 1/60s spacing.
-    simulate(seed = 1) {
+    // Run a throw. Returns { values, frames, steps, settledAt, flat, cocked }. `frames` is an array of
+    // samples; each sample is an array of { p:{x,y,z}, q:{x,y,z,w} } — one per die — at 1/60s spacing.
+    // `obstacles` are static resting dice (each { p, q }) the thrown dice bounce off — used to re-roll
+    // only the cocked dice from a throw while the ones that landed flat stay put.
+    simulate(seed = 1, obstacles = []) {
       const rng = mulberry32(seed >>> 0);
       const dice = seedDice(rng);
       const frames = [];
@@ -309,23 +329,24 @@ export function createDiceSim(userOpts = {}) {
       let t = 0, settledAt = -1;
       const maxSteps = Math.ceil(o.maxTime / o.subDt);
       for (let s = 0; s < maxSteps; s++) {
-        step(dice, o.subDt);
+        step(dice, o.subDt, obstacles);
         t += o.subDt;
         if (s % subPerFrame === subPerFrame - 1) snapshot();
         if (allAsleep(dice, o.subDt)) { settledAt = t; break; }
       }
-      // A cocked die (leaning on an edge or perched on another) is the caller's cue to re-roll. Read
-      // that from the raw settled pose; only lay the dice flat when the whole throw landed clean, so a
-      // cocked throw stays visibly cocked in its final frame (making the automatic re-roll read).
-      const cocked = dice.some((d) => !isFlat(d));
-      if (!cocked) for (const d of dice) settleFlat(d);
+      // Which dice landed FLAT vs cocked (leaning on an edge, or perched on another die)? Lay the flat
+      // ones down cleanly and leave any cocked one in its raw pose — the caller re-rolls just those,
+      // and a cocked die staying visibly cocked in the final frame makes that re-roll read.
+      const flat = dice.map((d) => isFlat(d));
+      dice.forEach((d, i) => { if (flat[i]) settleFlat(d); });
       snapshot(); // final rest pose
       return {
         values: dice.map((d) => readUpValue(d.q)),
         frames,
         steps: frames.length,
         settledAt: settledAt < 0 ? o.maxTime : settledAt,
-        cocked,
+        flat,
+        cocked: flat.some((f) => !f),
       };
     },
   };

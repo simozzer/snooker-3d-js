@@ -316,41 +316,62 @@ export default function mount(ctx) {
   const nextSeed = () => (seedCounter = (seedCounter * 1664525 + 1013904223) >>> 0);
   const MAX_REROLLS = 6; // safety cap so a pathological throw can never loop forever
 
-  // Run the physics for the thrown dice and play it back, then commit the settled values to the
-  // Farkle engine and call `onSettled`.
+  // Roll the live dice, play the throw back, then commit the settled faces to the Farkle engine. A die
+  // that lands COCKED (didn't lie flat) is picked up and thrown again on its own — just like at a real
+  // table — while the dice that landed flat stay exactly where they are; only when every die is flat do
+  // we read the faces. `onSettled` fires once, with the final result.
   function rollAndPlay(onSettled) {
     const s = engine.state();
     const thrown = thrownIndices();
     const firstRoll = s.phase === 'await-roll';
     busy = true; syncButtons(); renderHud();
     clearTableForThrow(thrown);
-    throwOnce(thrown, firstRoll, onSettled, 0);
-  }
 
-  // One physical throw. If any die lands cocked (didn't lie flat), pause a beat and throw again —
-  // up to the cap — before committing; otherwise feed the settled faces into the rules engine.
-  function throwOnce(thrown, firstRoll, onSettled, attempt) {
-    const result = createDiceSim({ count: thrown.length }).simulate(nextSeed());
-    playback = {
-      thrown,
-      frames: result.frames,
-      start: perfNow(),
-      done: () => {
-        playback = null;
-        if (result.cocked && attempt < MAX_REROLLS) {
-          ui.status('Cocked dice — re-rolling…');
-          setTimeout(() => throwOnce(thrown, firstRoll, onSettled, attempt + 1), 650);
-          return;
-        }
-        if (attempt > 0) ui.status(null);
-        const values = result.values;
-        const res = firstRoll ? engine.roll(values) : engine.rollAgain(values);
-        busy = false;
-        placeDice(); renderHud(); syncButtons();
-        onSettled(res);
-      },
+    const finalPose = {}; // engine idx → last settled { p, q } (re-rolls read the flat dice as obstacles)
+    const value = {};     // engine idx → settled face value
+    let rerolls = 0;
+
+    const commit = () => {
+      if (rerolls > 0) ui.status(null); // clear the "re-rolling" note
+      const values = thrown.map((i) => value[i]);
+      const res = firstRoll ? engine.roll(values) : engine.rollAgain(values);
+      busy = false;
+      placeDice(); renderHud(); syncButtons();
+      onSettled(res);
     };
-    applyFrame(0); // lift the thrown dice to their airborne start now, before the next paint
+
+    // Throw `slots` (engine indices) as dynamic dice; every other thrown die rests as an obstacle so a
+    // re-rolled die can't land on top of one. Record each die's pose/value/flatness, then re-roll any
+    // that came up cocked (capped), or commit once all are flat.
+    const throwSlots = (slots) => {
+      const obstacles = thrown.filter((i) => !slots.includes(i)).map((i) => finalPose[i]);
+      const result = createDiceSim({ count: slots.length }).simulate(nextSeed(), obstacles);
+      playback = {
+        thrown: slots,
+        frames: result.frames,
+        start: perfNow(),
+        done: () => {
+          playback = null;
+          const last = result.frames.at(-1);
+          const cocked = [];
+          slots.forEach((idx, j) => {
+            finalPose[idx] = last[j];
+            value[idx] = result.values[j];
+            if (!result.flat[j]) cocked.push(idx);
+          });
+          if (cocked.length && rerolls < MAX_REROLLS) {
+            rerolls++;
+            ui.status(cocked.length === 1 ? 'Cocked die — re-rolling it…' : `${cocked.length} cocked dice — re-rolling…`);
+            setTimeout(() => throwSlots(cocked), 650);
+            return;
+          }
+          commit();
+        },
+      };
+      applyFrame(0); // lift the thrown dice to their airborne start now, before the next paint
+    };
+
+    throwSlots(thrown);
   }
 
   function stepPlayback() {

@@ -106,6 +106,37 @@ test('flat-laid dice rest at varied headings, not all parallel to the tray walls
   assert.ok(midRange > 0.4, `headings look grid-aligned, not natural (mid-range fraction ${midRange.toFixed(2)})`);
 });
 
+test('simulate reports a per-die flat array, consistent with cocked, and lays the flat dice flat', () => {
+  const sim = createDiceSim({ count: 6 });
+  for (let seed = 1; seed <= 30; seed++) {
+    const r = sim.simulate(seed);
+    assert.equal(r.flat.length, 6);
+    assert.equal(r.cocked, r.flat.some((f) => !f), `seed ${seed}: cocked disagrees with flat[]`);
+    const last = r.frames.at(-1);
+    r.flat.forEach((isFlat, i) => {
+      if (isFlat) assert.ok(upFaceY(last[i]) > 0.999, `seed ${seed}: flat die ${i} not laid flat`);
+    });
+  }
+});
+
+test('a die thrown against an obstacle settles clear of it, never overlapping', () => {
+  // Re-rolling only the cocked dice throws them past the ones already at rest — those resting dice are
+  // passed in as obstacles, and the thrown die must never come to rest on top of / inside one.
+  const sim = createDiceSim({ count: 1 });
+  const size = sim.size;
+  const obstacle = { p: { x: 0, y: size / 2, z: 0 }, q: { x: 0, y: 0, z: 0, w: 1 } }; // resting at centre
+  let checked = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const r = sim.simulate(seed, [obstacle]);
+    if (!r.flat[0]) continue; // a cock (e.g. perched on the obstacle) is what the view re-rolls
+    checked++;
+    const d = r.frames.at(-1)[0];
+    const horiz = Math.hypot(d.p.x, d.p.z);
+    assert.ok(horiz > size * 0.6, `seed ${seed}: die overlaps the obstacle (horiz=${horiz.toFixed(2)})`);
+  }
+  assert.ok(checked >= 28, `expected most throws to settle flat and clear (only ${checked}/40)`);
+});
+
 test('throws settle well before the time cap', () => {
   const sim = createDiceSim({ count: 6 });
   let total = 0;

@@ -61,6 +61,16 @@
       #backlink { position: absolute; top: 27px; left: 12px; z-index: 6; font: 600 12px/1 system-ui, sans-serif;
         color: #7fb0d8; text-decoration: none; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
       #backlink:hover { text-decoration: underline; }
+      /* relay reachability — small, bottom-left; only shown in online mode */
+      #netstat { position: absolute; bottom: 10px; left: 12px; z-index: 6; display: none; align-items: center; gap: 6px;
+        pointer-events: none; user-select: none; font: 600 11px/1 system-ui, sans-serif; letter-spacing: .3px; color: #8fa3b5;
+        text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+      #netstat.show { display: flex; }
+      #netstat .dot { width: 8px; height: 8px; border-radius: 50%; background: #6f8496; }
+      #netstat.online .dot { background: #54c98a; }
+      #netstat.connecting .dot { background: #ffcf5b; animation: netpulse 1s ease-in-out infinite; }
+      #netstat.offline .dot { background: #e23b3b; }
+      @keyframes netpulse { 50% { opacity: .3; } }
       #bcastbanner { position: absolute; top: 16%; left: 50%; transform: translateX(-50%); z-index: 4; pointer-events: none;
         display: none; padding: 12px 30px; border-radius: 999px; font-weight: 900; letter-spacing: 4px; font-size: 30px;
         white-space: nowrap; text-shadow: 0 2px 10px rgba(0,0,0,.75); background: rgba(10,12,16,0.66); }
@@ -137,6 +147,7 @@
       <div id="view">
         <div id="version"></div>
         <a id="backlink" href="../index.html">← All games</a>
+        <div id="netstat"><span class="dot"></span><span id="netstat-label">Server</span></div>
         <div id="replayband">
           <div class="lb top"></div>
           <div class="lb bottom"></div>
@@ -191,10 +202,21 @@
             <option value="ai" selected>You vs AI</option>
             <option value="human">Two players (hot-seat)</option>
             <option value="self">Watch AI vs AI</option>
+            <option value="online">Play online</option>
           </select>
         </div>
         <div class="ctl" id="row-difficulty"><label>AI difficulty</label>
           <select id="difficulty"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option><option value="deadly">Deadly</option></select>
+        </div>
+        <div class="ctl" id="online-lobby" style="display:none;"><label>Online game</label>
+          <button id="net-create">Create room</button>
+          <div class="aimrow">
+            <input id="net-code" placeholder="CODE" maxlength="4" autocomplete="off" spellcheck="false"
+              style="flex:1; min-width:0; letter-spacing:3px; text-transform:uppercase; font-weight:700; text-align:center; min-height:34px; border-radius:8px; background:#222b34; color:#e8e8e8; border:1px solid #3a4753;" />
+            <button id="net-join" class="sec">Join</button>
+          </div>
+          <div id="net-status" class="hint" style="min-height:16px;"></div>
+          <button id="net-rematch" class="sec" style="display:none;">↻ Rematch</button>
         </div>
         <div class="ctl"><label>Aim<span id="v-angle"></span></label>
           <div class="aimrow">

@@ -33,6 +33,9 @@ import { createPreview } from './preview3d.js';
 import { driveReplayCamera } from './replaycam.js';
 import { buildCrowd } from './crowd.js';
 import { encodeFrame, decodeFrame, verifyFrame, variantId as shareVariantId, variantById as shareVariantById } from '../src/share.js';
+import { createCueOnline, shotPayload, applyTable, serializeTable } from './games/cue-online.js';
+import { createAuth } from './auth.js';
+import { AUTH } from './auth-config.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
 // from the selected variant. This file only draws — the physics/rules/AI are the headless engine the
@@ -445,9 +448,10 @@ function sliderShot() {
 // Redraw the human's aim preview — only when it's actually the human's turn to line up a shot. Also
 // re-evaluates the cue-lift spin lock for the new aim (draw may become unavailable / available again).
 function refreshHumanPreview() {
-  if (game && !playing && !game.frame.frameOver && !isAiTurn()) { clampSpinToConstraint(); drawPad(); refreshLabels(); }
+  const can = game && !playing && !game.frame.frameOver && !isAiTurn() && canPlayLocally(); // online: only on your own turn
+  if (can) { clampSpinToConstraint(); drawPad(); refreshLabels(); }
   const depth = trajectoryDepth();
-  if (!game || playing || game.frame.frameOver || isAiTurn() || depth <= 0) { clearPreview(); return; }
+  if (!can || depth <= 0) { clearPreview(); return; }
   drawPreviewPaths(computePreviewPaths(sliderShot(), depth));
 }
 
@@ -558,7 +562,8 @@ function playAiShot(shot) {
 
 el('trajectory').addEventListener('change', refreshHumanPreview);
 
-const aiEnabled = () => el('aimode').value !== 'human'; // 'off' human-vs-human, else vs AI / self-play
+const onlineMode = () => el('aimode').value === 'online';
+const aiEnabled = () => { const m = el('aimode').value; return m !== 'human' && m !== 'online'; }; // else vs AI / self-play
 const selfPlay = () => el('aimode').value === 'self';
 const difficulty = () => (trick || selfPlay() ? 'deadly' : el('difficulty').value); // Trick Shots + AI-vs-AI always play at Deadly
 
@@ -601,7 +606,151 @@ function updateRulesPanel() {
 }
 updateRulesPanel(); // initial (snooker)
 // Player 0 = you (unless self-play). Player 1 = AI (when AI is on). Trick Shots is always solo.
-const isAiTurn = () => !trick && !game.frame.frameOver && (selfPlay() || (aiEnabled() && game.frame.turn === 1));
+const isAiTurn = () => !trick && !onlineMode() && !game.frame.frameOver && (selfPlay() || (aiEnabled() && game.frame.turn === 1));
+
+// ===== Online multiplayer (3D cue games) =======================================================
+// Turn-based, so we transfer the RESTING table each shot rather than streaming physics: the shooter
+// resolves their shot locally (authoritative) and relays {shot token + resting pieces + frame}; the
+// opponent re-plays the token for the animation, then SNAPS to the transferred truth. See
+// web/games/cue-online.js for the protocol and tools/cue-online-smoke.mjs for the lockstep proof.
+let online = null;          // the relay controller while in online mode (null otherwise)
+let mySeat = -1;            // our seat: 0 (host, breaks first) or 1
+let onlineSeed = 0;         // the room's shared rack seed → both clients rack identically
+let remotePending = null;   // authoritative table+frame to snap to once a peer's shot has animated
+let applyingRemote = false; // true while playShot is ANIMATING a peer's shot (so we don't re-relay it)
+let sendOnSettle = false;   // the shot that just resolved is a LOCAL one to relay once it settles
+let lastLocalShot = null;   // the shot object to relay at settle
+let resultReported = false; // has this frame's result been tallied to the relay yet? (once per frame)
+let remoteQueue = [];       // peer shots that arrived while we were busy — pumped when idle
+const onlineActive = () => !!online && online.started();
+const isMyTurn = () => !!game && !!game.frame && game.frame.turn === mySeat;
+const canPlayLocally = () => !onlineMode() || (onlineActive() && isMyTurn() && !applyingRemote);
+
+const netstat = el('netstat');
+function setNetStat(state, label) {
+  netstat.classList.remove('online', 'connecting', 'offline');
+  netstat.classList.add('show', state);
+  if (label) el('netstat-label').textContent = label;
+}
+const cueAuth = createAuth(AUTH); // optional: authenticate the relay so finished online games tally into the score tables
+
+function enterOnline() {
+  el('online-lobby').style.display = '';
+  el('game').disabled = true;      // the room is fixed to one variant; don't let it change mid-session
+  el('play').disabled = true;      // nothing to play until a room is live
+  setNetStat('connecting', 'Connecting…');
+  online = createCueOnline({
+    onReady: onOnlineReady, onRemoteShot: applyRemoteShot, onStatus: onOnlineStatus, onError: onOnlineError,
+    onPeerLeft: () => { status.textContent = 'Opponent disconnected — waiting for them to return…'; },
+    onPeerBack: () => { status.textContent = 'Opponent reconnected.'; },
+    onRematch: onOnlineRematch,
+  });
+  online.connect().then(async () => {
+    setNetStat('online', 'Multiplayer online');
+    el('net-status').textContent = 'Create a room, or join with a code.';
+    try { const t = cueAuth.enabled ? await cueAuth.getAccessToken() : null; if (t) online.authenticate(t); } catch { /* anon is fine */ }
+  }).catch(() => { setNetStat('offline', 'Multiplayer offline'); el('net-status').textContent = 'Server unreachable.'; });
+}
+function exitOnline() {
+  el('online-lobby').style.display = 'none';
+  el('net-rematch').style.display = 'none';
+  el('game').disabled = false;
+  el('play').disabled = false;
+  el('net-create').disabled = false; el('net-join').disabled = false; el('net-code').disabled = false;
+  netstat.classList.remove('show');
+  if (online) { try { online.close(); } catch { /* already gone */ } online = null; }
+  mySeat = -1; applyingRemote = false; remotePending = null; remoteQueue = []; sendOnSettle = false; resultReported = false;
+}
+
+function onOnlineStatus(s) {
+  if (s.state === 'waiting') {
+    el('net-status').innerHTML = `Room <b>${s.code}</b> — share the code; waiting for an opponent…`;
+    status.textContent = `Waiting for an opponent to join room ${s.code}…`;
+  } else if (s.state === 'offline') setNetStat('offline', 'Multiplayer offline');
+}
+function onOnlineError(err) {
+  const msg = err === 'no-room' ? 'No such room — check the code.'
+    : err === 'full' ? 'That room is already full.'
+    : err === 'room-closed' ? 'Room closed.'
+    : `Error: ${err}`;
+  el('net-status').textContent = msg;
+}
+function startOnlineFrame() {
+  applyingRemote = false; remotePending = null; remoteQueue = []; sendOnSettle = false; resultReported = false;
+  newFrameGame(); // racks from the shared seed (onlineActive() is true, so newFrameGame uses onlineSeed)
+}
+function onOnlineReady(seat, seed, log, roomGame) {
+  mySeat = seat; onlineSeed = seed >>> 0;
+  el('net-create').disabled = true; el('net-join').disabled = true; el('net-code').disabled = true;
+  el('net-status').innerHTML = `Connected — you are <b>${seat === 0 ? 'Player 1 (you break)' : 'Player 2'}</b>.`;
+  el('net-rematch').style.display = 'none';
+  if (roomGame && VARIANTS[roomGame] && variant.id !== roomGame) { el('game').value = roomGame; setVariant(VARIANTS[roomGame]); }
+  else startOnlineFrame();
+  // Reconnect / late join: fast-forward to the latest authoritative table in the log.
+  const moves = (log || []).filter((e) => e.kind === 'move');
+  if (moves.length) { applyTable(game, moves[moves.length - 1].payload); syncBallMeshes(game.pieces); orient.clear(); updateScore(); }
+  syncOnlineTurnUI();
+}
+function onOnlineRematch(seed) {
+  onlineSeed = seed >>> 0;
+  el('net-rematch').style.display = 'none';
+  startOnlineFrame();
+  syncOnlineTurnUI();
+}
+
+// A peer's shot arrived. Queue it (it may land mid-animation of our own shot) and pump when idle.
+function applyRemoteShot(payload) { remoteQueue.push(payload); pumpRemote(); }
+function pumpRemote() {
+  if (!onlineActive() || applyingRemote || playing || replaying || pauseThen || aiLineup || aiPlace) return;
+  if (!remoteQueue.length) return;
+  const payload = remoteQueue.shift();
+  remotePending = payload; applyingRemote = true; sendOnSettle = false; shotIsAi = false;
+  status.textContent = 'Opponent is at the table…';
+  playShot(payload.shot); // animate their shot locally; we SNAP to remotePending when it settles
+}
+function applyRemoteSnapIfPending() {
+  if (!applyingRemote || !remotePending) return;
+  applyTable(game, remotePending); // authoritative correction over any local float drift
+  remotePending = null; applyingRemote = false; sendOnSettle = false;
+  syncBallMeshes(game.pieces); orient.clear(); updateScore();
+}
+// Called once per resolved shot, after the authoritative state is in place: relay our own shot, tally
+// a finished frame, refresh the turn UI, and pump the next queued peer shot.
+function settleOnline() {
+  if (!onlineActive()) return;
+  if (sendOnSettle) { online.sendShot(shotPayload(lastLocalShot, game), game.frame.turn); sendOnSettle = false; }
+  if (game.frame.frameOver) reportOnlineResult();
+  syncOnlineTurnUI();
+  setTimeout(pumpRemote, 50); // small beat before animating the opponent's next shot
+}
+function reportOnlineResult() {
+  if (resultReported) return;
+  resultReported = true;
+  const w = game.frame.winner;
+  online.reportGameOver(w === 'tie' || w == null ? null : w); // seat 0/1, or null for a tie
+  el('net-rematch').style.display = '';
+}
+function syncOnlineTurnUI() {
+  if (!onlineMode()) return;
+  const playBtn = el('play');
+  if (!onlineActive()) { playBtn.disabled = true; return; }
+  playBtn.disabled = !isMyTurn() || game.frame.frameOver || playing || applyingRemote;
+  updateTurnPrompt();
+}
+
+el('net-create').addEventListener('click', () => { if (online) online.create(variant.id); });
+el('net-join').addEventListener('click', () => { const c = el('net-code').value.trim(); if (online && c) online.join(c); });
+el('net-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') el('net-join').click(); });
+el('net-rematch').addEventListener('click', () => { if (online) online.rematch(); });
+
+// Minimal test hook (used by tools/cue-online-browser.mjs) so a headless run can read the online
+// state and the resting table without reaching into module internals. Harmless in normal use.
+if (typeof window !== 'undefined') window.__cue = {
+  table: () => serializeTable(game),
+  turn: () => (game && game.frame ? game.frame.turn : null),
+  seat: () => mySeat, active: () => onlineActive(), playing: () => playing,
+  over: () => !!(game && game.frame && game.frame.frameOver),
+};
 
 let playing = false;
 let simT = 0;
@@ -626,6 +775,7 @@ const usesPoints = () => Array.isArray(game && game.frame && game.frame.scores);
 
 function playerLabel(i) {
   if (i == null || i < 0) return '';
+  if (onlineMode()) return i === mySeat ? 'You' : 'Opponent';
   if (selfPlay()) return `AI ${i + 1}`; // both sides are the AI
   if (!aiEnabled()) return `Player ${i + 1}`; // hot-seat
   return i === 0 ? 'You' : 'AI';
@@ -786,9 +936,15 @@ function updateScore() {
 // idle and on strike (not the AI, not mid-shot, not Trick Shots). Goal text comes from variant.turnGoal.
 function updateTurnPrompt() {
   const p = el('turnprompt'); if (!p) return;
-  const yours = game && !trick && !playing && !aiLineup && !aiPlace && !sharedReplay && !game.frame.frameOver && !isAiTurn();
+  // Online spectating: it's the opponent's turn — say so instead of leaving it blank.
+  if (onlineActive() && !game.frame.frameOver && !isMyTurn() && !playing) {
+    p.className = 'show';
+    p.innerHTML = `⏳ OPPONENT'S TURN<span class="goal">Waiting for their shot…</span>`;
+    return;
+  }
+  const yours = game && !trick && !playing && !aiLineup && !aiPlace && !sharedReplay && !game.frame.frameOver && !isAiTurn() && (!onlineMode() || isMyTurn());
   if (!yours) { p.className = ''; p.textContent = ''; return; }
-  const who = aiEnabled() ? '▶ YOUR TURN' : `▶ PLAYER ${game.frame.turn + 1} — YOUR TURN`;
+  const who = onlineMode() ? '▶ YOUR SHOT' : (aiEnabled() ? '▶ YOUR TURN' : `▶ PLAYER ${game.frame.turn + 1} — YOUR TURN`);
   const goal = variant.turnGoal ? variant.turnGoal(game.frame) : (variant.centerText ? variant.centerText(game.frame) : '');
   p.innerHTML = `${who}${goal ? `<span class="goal">Goal: ${escHtml(goal)}</span>` : ''}`;
   p.className = 'show';
@@ -812,9 +968,11 @@ function newFrameGame() {
   recallCount = 0; lastOutcome = null; awaitingMiss = false; el('missprompt').classList.remove('show'); // clear any miss state
   refRespotSpoken = false; refSay = ''; clearTimeout(refTimer); // reset the referee's per-frame call state
   clearShareContext(); // a fresh frame drops any shared/challenge context
-  frameSeed = seedCounter++ >>> 0; // record the rack seed (u32) so this frame is shareable/reproducible
+  // Online: rack from the room's SHARED seed so both clients get the identical opening. Solo: a fresh
+  // per-load seed each frame (still recorded, so sharing/replay stays reproducible).
+  frameSeed = onlineActive() ? (onlineSeed >>> 0) : (seedCounter++ >>> 0);
   frameShots = [];
-  aiRng = mulberry32(frameSeed); // fresh seed each frame → varied openings, still reproducible
+  aiRng = mulberry32(frameSeed);
   game = newGame(variant, { rng: aiRng });
   resetBreaks({ keepHigh: true }); // new frame, but the session-high break carries across frames
   syncBallMeshes(game.pieces);
@@ -823,10 +981,11 @@ function newFrameGame() {
   status.textContent = game.frame.message;
   updateScore();
   updatePBLine();
-  if (game.frame.ballInHand) beginBallInHand(); else endBallInHand(); // break = ball-in-hand
+  if (game.frame.ballInHand && canPlayLocally()) beginBallInHand(); else endBallInHand(); // break = ball-in-hand (only place it on your own turn)
   maybeAiTurn();
-  if (!isAiTurn()) { resetHumanControls(); setSuggestedAim(); }
+  if (!isAiTurn() && canPlayLocally()) { resetHumanControls(); setSuggestedAim(); }
   refreshHumanPreview();
+  syncOnlineTurnUI();
 }
 
 // Resolve a shot through the real game/rules, replay it, then chain turns.
@@ -853,6 +1012,8 @@ function playShot(shot) {
   playing = true;
   lastFrame = performance.now();
   beginShotCam(shot); // cue it from the player's angle, then pan out to watch
+  // Online: a shot WE initiated (not a peer animation) is relayed once it settles — see settleOnline.
+  if (onlineActive() && !applyingRemote) { sendOnSettle = true; lastLocalShot = shot; }
 }
 
 // --- pot replays -----------------------------------------------------------------------------
@@ -1178,6 +1339,7 @@ function humanShot() {
   if (playing || sharedReplay || awaitingMiss) return; // awaiting the miss choice → Play is inert
   if (trick) { cancelTrickAuto(); if (!trick.awaiting) playTrickShot(sliderShot()); return; }
   if (isAiTurn() || game.frame.frameOver) return;
+  if (onlineMode() && !canPlayLocally()) return; // online: not your turn (or a peer shot is animating)
   shotIsAi = false;
   playShot(sliderShot());
 }
@@ -1269,6 +1431,7 @@ function maybeAiTurn() {
 // Called once a shot's replay finishes: settle the meshes to the resolved layout, then hand off.
 function onReplayEnd() {
   if (trick) { onTrickShotEnd(); return; } // Trick Shots: judge the goal, don't run game rules/AI
+  applyRemoteSnapIfPending(); // online: if this was a peer's shot, snap to the transferred authoritative state
   syncBallMeshes(game.pieces); // authoritative resting positions from the rules reconciliation
   updateScore();
   flushBanner(); // century / frame-won banner, held until the shot has settled
@@ -1292,14 +1455,16 @@ function onReplayEnd() {
   }
   if (game.frame.frameOver) {
     status.textContent = game.frame.message;
+    if (onlineActive()) settleOnline(); // relay the finishing shot + tally the result, offer a rematch
     // Watch AI vs AI → rack a fresh frame automatically after a beat so it plays on indefinitely
     if (selfPlay() && !exhibition) setTimeout(() => { if (game.frame.frameOver && selfPlay() && !exhibition) newFrameGame(); }, 3000);
     return;
   }
   // MISS RULE: a foul where the offender COULD have hit the ball-on but didn't. The incoming player may
   // recall it (make them play again from the original position). Capped so a deterministic AI can't
-  // livelock, and skipped in AI-vs-AI (nothing to choose, keeps the exhibition flowing).
-  if (lastOutcome && lastOutcome.miss && lastPreShot && recallCount < MAX_RECALLS && !selfPlay()) {
+  // livelock, and skipped in AI-vs-AI (nothing to choose). Also skipped ONLINE — the shooter is
+  // authoritative and cross-client recall would need its own protocol; the foul just stands for now.
+  if (!onlineMode() && lastOutcome && lastOutcome.miss && lastPreShot && recallCount < MAX_RECALLS && !selfPlay()) {
     if (isAiTurn()) { if (shouldRecallMiss(game)) { recallMiss(); return; } } // AI incoming decides
     else { offerMissChoice(); return; } // human incoming → pause and offer the choice
   }
@@ -1309,10 +1474,11 @@ function onReplayEnd() {
 
 // The normal end-of-shot hand-off (also reached after the miss choice resolves).
 function finishHandoff() {
-  if (game.frame.ballInHand) beginBallInHand(); else endBallInHand(); // cue potted → place it before playing on
+  if (game.frame.ballInHand && canPlayLocally()) beginBallInHand(); else endBallInHand(); // cue potted → place it before playing on (only on your own turn)
   maybeAiTurn();
-  if (!isAiTurn()) { resetHumanControls(); setSuggestedAim(); } // your shot → sensible controls + a suggested aim line
+  if (!isAiTurn() && canPlayLocally()) { resetHumanControls(); setSuggestedAim(); } // your shot → sensible controls + a suggested aim line
   refreshHumanPreview(); // if it's now your shot, show the aim line
+  settleOnline(); // online: relay our shot, pump the opponent's next, refresh the turn UI
 }
 
 // Recall a miss: restore the table + frame to before the missed shot (but the opponent KEEPS the foul
@@ -1363,7 +1529,15 @@ function setVariant(v) {
 
 el('play').addEventListener('click', humanShot);
 el('newframe').addEventListener('click', newFrameGame);
-el('aimode').addEventListener('change', () => { syncDifficultyUI(); updateScore(); maybeAiTurn(); refreshHumanPreview(); });
+let prevAimode = el('aimode').value;
+el('aimode').addEventListener('change', () => {
+  const leavingOnline = prevAimode === 'online' && !onlineMode();
+  prevAimode = el('aimode').value;
+  if (onlineMode()) enterOnline(); else exitOnline();
+  el('row-difficulty').style.display = onlineMode() ? 'none' : '';
+  syncDifficultyUI(); updateScore(); maybeAiTurn(); refreshHumanPreview();
+  if (leavingOnline) newFrameGame(); // returning to solo → a fresh local frame (the online frame is void)
+});
 el('game').addEventListener('change', () => {
   const v = el('game').value;
   if (v === 'trickshots') startTrickShots();

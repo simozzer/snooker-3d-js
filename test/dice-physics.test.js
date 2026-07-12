@@ -46,20 +46,64 @@ test('a throw is deterministic for a given seed', () => {
   assert.deepEqual(la, lb);
 });
 
-test('every die settles flat on the floor, inside the tray, reading a valid 1..6', () => {
+// A die is "flat" when one of its face normals points essentially straight up.
+function upFaceY(d) {
+  const q = d.q;
+  let best = -Infinity;
+  for (const f of FACES) {
+    const v = f.n;
+    const tx = 2 * (q.y * v.z - q.z * v.y);
+    const ty = 2 * (q.z * v.x - q.x * v.z);
+    const tz = 2 * (q.x * v.y - q.y * v.x);
+    const wy = v.y + q.w * ty + (q.z * tx - q.x * tz);
+    best = Math.max(best, wy);
+  }
+  return best;
+}
+
+test('a clean (uncocked) throw lays every die flat on the floor, inside the tray, reading 1..6', () => {
   const sim = createDiceSim({ count: 6 });
   const { tray, size } = sim;
+  let clean = 0;
   for (let seed = 1; seed <= 40; seed++) {
     const r = sim.simulate(seed);
     assert.equal(r.values.length, 6);
     for (const v of r.values) assert.ok(v >= 1 && v <= 6 && Number.isInteger(v), `value ${v} out of range`);
+    if (r.cocked) continue; // a cocked throw is deliberately left un-flattened for the view to re-roll
+    clean++;
     const last = r.frames.at(-1);
     for (const d of last) {
       assert.ok(Math.abs(minCornerY(d, size)) < 0.03, `die not resting on floor (minY=${minCornerY(d, size)})`);
+      assert.ok(upFaceY(d) > 0.999, `clean die not laid flat (upFaceY=${upFaceY(d).toFixed(4)})`);
       assert.ok(Math.abs(d.p.x) <= tray.halfX + 0.01, 'die stayed within the tray in X');
       assert.ok(Math.abs(d.p.z) <= tray.halfZ + 0.01, 'die stayed within the tray in Z');
     }
   }
+  // Cocked throws should be the rare exception, not the rule — the physics settles flat almost always.
+  assert.ok(clean >= 36, `too many cocked throws (${40 - clean}/40) — physics is not settling flat`);
+});
+
+test('flat-laid dice rest at varied headings, not all parallel to the tray walls', () => {
+  // The old snap-to-grid always left the die's X axis on a world axis (yaw a multiple of 90°). Laying
+  // flat while keeping the natural heading must produce a spread of yaws across dice/throws.
+  const sim = createDiceSim({ count: 6 });
+  const yaws = [];
+  for (let seed = 1; seed <= 20; seed++) {
+    const r = sim.simulate(seed);
+    if (r.cocked) continue;
+    for (const d of r.frames.at(-1)) {
+      const q = d.q; // heading = atan2 of the die's local +X projected onto the floor
+      const fx = 1 - 2 * (q.y * q.y + q.z * q.z);
+      const fz = 2 * (q.x * q.z - q.w * q.y);
+      let yaw = Math.atan2(fz, fx) * 180 / Math.PI; // -180..180
+      yaw = ((yaw % 90) + 90) % 90;                 // fold into 0..90 (a cube face has 90° symmetry)
+      yaws.push(yaw);
+    }
+  }
+  // If everything were axis-aligned these would all sit at ~0/90 (folded → ~0). A genuine spread has a
+  // healthy fraction landing mid-range.
+  const midRange = yaws.filter((y) => y > 15 && y < 75).length / yaws.length;
+  assert.ok(midRange > 0.4, `headings look grid-aligned, not natural (mid-range fraction ${midRange.toFixed(2)})`);
 });
 
 test('throws settle well before the time cap', () => {

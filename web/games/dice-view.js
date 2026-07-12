@@ -313,23 +313,38 @@ export default function mount(ctx) {
     }
   }
 
+  const nextSeed = () => (seedCounter = (seedCounter * 1664525 + 1013904223) >>> 0);
+  const MAX_REROLLS = 6; // safety cap so a pathological throw can never loop forever
+
   // Run the physics for the thrown dice and play it back, then commit the settled values to the
   // Farkle engine and call `onSettled`.
   function rollAndPlay(onSettled) {
     const s = engine.state();
     const thrown = thrownIndices();
-    const result = createDiceSim({ count: thrown.length }).simulate((seedCounter = (seedCounter * 1664525 + 1013904223) >>> 0));
+    const firstRoll = s.phase === 'await-roll';
     busy = true; syncButtons(); renderHud();
     clearTableForThrow(thrown);
+    throwOnce(thrown, firstRoll, onSettled, 0);
+  }
+
+  // One physical throw. If any die lands cocked (didn't lie flat), pause a beat and throw again —
+  // up to the cap — before committing; otherwise feed the settled faces into the rules engine.
+  function throwOnce(thrown, firstRoll, onSettled, attempt) {
+    const result = createDiceSim({ count: thrown.length }).simulate(nextSeed());
     playback = {
       thrown,
       frames: result.frames,
       start: perfNow(),
       done: () => {
-        // feed the settled faces into the rules engine
-        const values = result.values;
-        const res = s.phase === 'await-roll' ? engine.roll(values) : engine.rollAgain(values);
         playback = null;
+        if (result.cocked && attempt < MAX_REROLLS) {
+          ui.status('Cocked dice — re-rolling…');
+          setTimeout(() => throwOnce(thrown, firstRoll, onSettled, attempt + 1), 650);
+          return;
+        }
+        if (attempt > 0) ui.status(null);
+        const values = result.values;
+        const res = firstRoll ? engine.roll(values) : engine.rollAgain(values);
         busy = false;
         placeDice(); renderHud(); syncButtons();
         onSettled(res);
@@ -569,6 +584,23 @@ export default function mount(ctx) {
       return { x: rect.left + (v.x * 0.5 + 0.5) * rect.width, y: rect.top + (-v.y * 0.5 + 0.5) * rect.height };
     },
     peek() { return { ...engine.state(), busy, over }; },
+    // Settled orientation of each currently-in-tray (not railed) die, for smoke tests: the world-space
+    // up-face verticality (1 = perfectly flat) and the heading (yaw about the vertical, degrees).
+    dicePoses() {
+      const s = engine.state();
+      const up = new THREE.Vector3(0, 1, 0);
+      const out = [];
+      for (let i = 0; i < 6; i++) {
+        const d = s.dice[i];
+        if (d.held || !diceMeshes[i].visible) continue;
+        const q = diceMeshes[i].quaternion;
+        let best = -Infinity;
+        for (const f of FACES) best = Math.max(best, new THREE.Vector3(f.n.x, f.n.y, f.n.z).applyQuaternion(q).dot(up));
+        const fwd = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+        out.push({ upFaceY: best, yaw: Math.atan2(fwd.z, fwd.x) * 180 / Math.PI });
+      }
+      return out;
+    },
     destroy() {
       cancelAnimationFrame(raf);
       canvas.removeEventListener('pointerdown', onPointer);

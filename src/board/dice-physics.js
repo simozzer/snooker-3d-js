@@ -9,7 +9,10 @@
 //   2. substep: gravity → collision impulses (OBB-vs-plane with friction torque; die–die as spheres)
 //      → integrate position + orientation → positional correction → light damping
 //   3. detect settle (all dice below sleep thresholds for a spell, or a hard time cap)
-//   4. snap each die to the nearest axis-aligned rest pose and read the up-face value
+//   4. lay each settled die perfectly FLAT (up-face straight up) while KEEPING its natural heading —
+//      real dice come to rest at any yaw, not lined up parallel to the walls — then read the up-face.
+//      A die that didn't land flat (cocked on an edge, or perched on another die) is reported via a
+//      `cocked` flag so the caller can pause and automatically re-roll instead of forcing it flat.
 // simulate() returns the sampled per-frame poses plus the final face values, ready to (a) animate and
 // (b) feed straight into the Farkle engine's roll(values).
 //
@@ -81,33 +84,28 @@ export function readUpValue(q) {
   return val;
 }
 
-// Snap an orientation to the nearest of a cube's 24 axis-aligned rest poses (clean, flat resting).
-// Round each rotated basis vector to its dominant signed axis, then rebuild an orthonormal, right-
-// handed frame and convert back to a quaternion.
-function snapQuat(q) {
-  const cols = [qrot(q, V(1, 0, 0)), qrot(q, V(0, 1, 0)), qrot(q, V(0, 0, 1))];
-  const axis = (v) => {
-    const ax = Math.abs(v.x), ay = Math.abs(v.y), az = Math.abs(v.z);
-    if (ax >= ay && ax >= az) return V(Math.sign(v.x), 0, 0);
-    if (ay >= az) return V(0, Math.sign(v.y), 0);
-    return V(0, 0, Math.sign(v.z));
-  };
-  let cx = axis(cols[0]);
-  let cy = axis(cols[1]);
-  // Guarantee cy is distinct from cx; if they collapsed to the same axis, recover from the cross.
-  if (Math.abs(cx.x) === Math.abs(cy.x) && Math.abs(cx.y) === Math.abs(cy.y) && Math.abs(cx.z) === Math.abs(cy.z)) {
-    cy = axis(cols[2]);
+// The world normal of a die's up-most face, and how vertical it is (its .y = cos of the tilt: 1 when
+// dead flat, ~0.71 when balanced on an edge, ~0.58 on a corner).
+function upFaceNormal(q) {
+  let best = null, bestY = -Infinity;
+  for (const f of FACES) {
+    const wn = qrot(q, f.n);
+    if (wn.y > bestY) { bestY = wn.y; best = wn; }
   }
-  let cz = vcross(cx, cy); // right-handed third axis
-  // matrix columns cx,cy,cz → quaternion
-  const m = [[cx.x, cy.x, cz.x], [cx.y, cy.y, cz.y], [cx.z, cy.z, cz.z]];
-  const tr = m[0][0] + m[1][1] + m[2][2];
-  let x, y, z, w;
-  if (tr > 0) { const s = Math.sqrt(tr + 1) * 2; w = 0.25 * s; x = (m[2][1] - m[1][2]) / s; y = (m[0][2] - m[2][0]) / s; z = (m[1][0] - m[0][1]) / s; }
-  else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) { const s = Math.sqrt(1 + m[0][0] - m[1][1] - m[2][2]) * 2; w = (m[2][1] - m[1][2]) / s; x = 0.25 * s; y = (m[0][1] + m[1][0]) / s; z = (m[0][2] + m[2][0]) / s; }
-  else if (m[1][1] > m[2][2]) { const s = Math.sqrt(1 + m[1][1] - m[0][0] - m[2][2]) * 2; w = (m[0][2] - m[2][0]) / s; x = (m[0][1] + m[1][0]) / s; y = 0.25 * s; z = (m[1][2] + m[2][1]) / s; }
-  else { const s = Math.sqrt(1 + m[2][2] - m[0][0] - m[1][1]) * 2; w = (m[1][0] - m[0][1]) / s; x = (m[0][2] + m[2][0]) / s; y = (m[1][2] + m[2][1]) / s; z = 0.25 * s; }
-  return qnorm({ x, y, z, w });
+  return best;
+}
+
+// Lay an orientation perfectly flat WITHOUT changing its heading: rotate by the minimal amount that
+// brings the up-most face normal onto +Y. That rotation is about a horizontal axis, so the die's yaw
+// (its spin about the vertical) is untouched — dice keep the varied, natural resting angles a real
+// throw produces instead of snapping parallel to the tray walls.
+function flattenQuat(q) {
+  const up = vnorm(upFaceNormal(q));
+  const axis = vcross(up, V(0, 1, 0)); // horizontal axis ⟂ to both up and vertical
+  const s = vlen(axis);
+  if (s < 1e-6) return qnorm(q);       // already vertical (or dead upside-down — up-most face is up)
+  const ang = Math.atan2(s, up.y);     // tilt angle between the up-face and vertical
+  return qnorm(qmul(qFromAxisAngle(axis, ang), q));
 }
 
 // ---- simulation ------------------------------------------------------------------------------
@@ -273,13 +271,26 @@ export function createDiceSim(userOpts = {}) {
     return asleep;
   }
 
-  // Snap a settled die to a flat rest pose and drop it exactly onto the floor.
-  function settle(d) {
-    d.q = snapQuat(d.q);
-    d.v = V(); d.w = V();
+  const minCornerY = (d) => {
     let minY = Infinity;
     for (const c of CORNERS) minY = Math.min(minY, vadd(d.p, qrot(d.q, V(c.x * H, c.y * H, c.z * H))).y);
-    d.p = V(d.p.x, d.p.y - minY, d.p.z); // rest the lowest corner on y = 0
+    return minY;
+  };
+
+  // Did this die come to rest FLAT on the tray floor? It must be (a) sitting square — a face pointing
+  // essentially straight up — and (b) resting on the floor, not perched on top of another die. Either
+  // failing means it's cocked, and the caller should re-roll rather than force it flat.
+  const FLAT_COS = Math.cos((14 * Math.PI) / 180); // up-face within 14° of vertical counts as flat
+  function isFlat(d) {
+    if (upFaceNormal(d.q).y < FLAT_COS) return false; // cocked on an edge/corner — up-face too tilted
+    return minCornerY(d) < H * 0.5;                    // low to the floor, not stacked on another die
+  }
+
+  // Lay a settled die flat (up-face straight up, natural heading kept) and drop it onto the floor.
+  function settleFlat(d) {
+    d.q = flattenQuat(d.q);
+    d.v = V(); d.w = V();
+    d.p = V(d.p.x, d.p.y - minCornerY(d), d.p.z); // rest the (now level) bottom face on y = 0
   }
 
   return {
@@ -303,13 +314,18 @@ export function createDiceSim(userOpts = {}) {
         if (s % subPerFrame === subPerFrame - 1) snapshot();
         if (allAsleep(dice, o.subDt)) { settledAt = t; break; }
       }
-      for (const d of dice) settle(d);
+      // A cocked die (leaning on an edge or perched on another) is the caller's cue to re-roll. Read
+      // that from the raw settled pose; only lay the dice flat when the whole throw landed clean, so a
+      // cocked throw stays visibly cocked in its final frame (making the automatic re-roll read).
+      const cocked = dice.some((d) => !isFlat(d));
+      if (!cocked) for (const d of dice) settleFlat(d);
       snapshot(); // final rest pose
       return {
         values: dice.map((d) => readUpValue(d.q)),
         frames,
         steps: frames.length,
         settledAt: settledAt < 0 ? o.maxTime : settledAt,
+        cocked,
       };
     },
   };

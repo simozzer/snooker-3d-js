@@ -488,7 +488,7 @@ export default function mount(ctx) {
       <li>Tap a piece to pick it up — its legal moves show as dots (captures as rings).</li>
       <li>Tap a highlighted square to move there; tap another of your pieces to switch.</li>
       <li>The last move is shaded gold; a king in check flashes red.</li>
-      <li><b>New game</b> restarts; <b>Undo</b> takes back your last move (and the AI's reply).</li>
+      <li><b>New game</b> restarts.</li>
     </ul>
     <h4>Modes</h4>
     <ul>

@@ -5,7 +5,7 @@ import { AUTH } from './auth-config.js';
 // board.js — the harness that turns board.html into a switchable board-game shell. It reads the
 // ?game= query string, lazily imports the matching view module, and drives it through one small
 // contract shared by chess / draughts / backgammon. All the outer chrome (opponent + difficulty
-// selects, New game / Undo, the turn + result banners, the rules panel) lives here so every game
+// selects, New game, the turn + result banners, the rules panel) lives here so every game
 // looks and behaves the same; each view only owns its canvas, its input, its engine and its AI.
 //
 // ---- VIEW CONTRACT ---------------------------------------------------------------------------
@@ -18,7 +18,7 @@ import { AUTH } from './auth-config.js';
 //       status(text),               // transient one-liner (whose move failed, hint, etc.)
 //       turn(text|null),            // prompt banner ("White to move"); null hides it
 //       result(text|null),          // game-over banner; null clears it (also re-enables New game)
-//       setUndo(enabled),           // toggle the Undo button
+//       setUndo(enabled),           // retained no-op — the Undo button was removed
 //     },
 //     getMode(): 'ai' | 'human',
 //     getDifficulty(): 'easy' | 'medium' | 'hard',
@@ -93,7 +93,7 @@ if (!entry) {
       // Online: offer a rematch once a game finishes; hide it the moment a fresh game starts.
       el('rematch').style.display = (netState.active && t) ? '' : 'none';
     },
-    setUndo: (on) => { el('undo').disabled = !on; },
+    setUndo: () => {}, // the Undo button was removed; kept as a no-op so game views need no change
   };
 
   // Shared online state; `net` is a stable handle the view captures at mount and uses to relay its
@@ -126,7 +126,6 @@ if (!entry) {
       el('row-difficulty').style.display = el('mode').value === 'ai' ? '' : 'none';
 
       el('newgame').addEventListener('click', () => controller.newGame());
-      el('undo').addEventListener('click', () => controller.undo());
 
       // Share the current position as ?game=<id>&state=<token>. Hidden if the game has no codec.
       const shareBtn = el('sharelink');

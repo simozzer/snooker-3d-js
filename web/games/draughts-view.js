@@ -448,7 +448,7 @@ export default function mount(ctx) {
       <ul>
         <li>Tap one of your pieces to select it; green dots show where it can go.</li>
         <li>Tap a dot to move. Multi-jumps continue automatically; if the jump can branch, tap the next square.</li>
-        <li><b>New game</b> restarts; <b>Undo</b> takes back your last move.</li>
+        <li><b>New game</b> restarts.</li>
       </ul>
       <h4>Rules (English draughts)</h4>
       <ul>

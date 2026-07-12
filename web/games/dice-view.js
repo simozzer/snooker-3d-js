@@ -181,12 +181,21 @@ export default function mount(ctx) {
     else if (aiMsg) line = aiMsg; // the computer's bank-or-roll deliberation (shown during its pause)
     else if (busy && mode === 'ai' && s.current === 1) line = `Computer (${AI_STYLE[difficulty].split(' — ')[0]}) rolling…`;
     else if (s.farkled) line = 'Farkle! No score — turn lost.';
-    else if (s.phase === 'await-roll') line = `First to ${TARGET} · roll to start your turn`;
+    else if (s.phase === 'await-roll') line = s.finalRound
+      ? `🏁 Final turn — beat ${beatOf(s)} to win · roll`
+      : `First to ${TARGET} · roll to start your turn`;
     else if (sel > 0) {
       const bankable = s.turnScore + sel;
-      line = engine.canBank()
-        ? `Selected ${sel} · turn ${bankable} · 💰 Bank to keep ${bankable}`
-        : `Selected ${sel} · turn ${bankable} · ${s.minBank - bankable} more to bank`;
+      if (s.finalRound) {
+        const my = s.players[s.current].score, beat = beatOf(s);
+        line = my + bankable > beat
+          ? `Turn ${bankable} · ${my + bankable} beats ${beat} — 🏆 Bank to win!`
+          : `Turn ${bankable} · need > ${beat} (have ${my + bankable}) — roll on`;
+      } else {
+        line = engine.canBank()
+          ? `Selected ${sel} · turn ${bankable} · 💰 Bank to keep ${bankable}`
+          : `Selected ${sel} · turn ${bankable} · ${s.minBank - bankable} more to bank`;
+      }
     } else line = `Turn ${s.turnScore} — tap the glowing dice to keep them`;
     promptEl.textContent = line;
   }
@@ -359,12 +368,28 @@ export default function mount(ctx) {
     return mode === 'human' || s.current === 0;
   }
 
+  // In the final round, the score the CURRENT player must OVERTAKE to win (the best of everyone else).
+  const beatOf = (s) => Math.max(...s.players.filter((_, i) => i !== s.current).map((p) => p.score));
+
+  // A turn just ended: if reaching the target concluded the game, show the result; otherwise play on.
+  function resolveTurnEnd() {
+    if (engine.state().phase === 'over') finishGame();
+    else afterTurnChange();
+  }
+
+  // Someone reached the target — announce the "last licks" chase.
+  function announceFinalRound(res) {
+    const s = engine.state();
+    const leader = s.players[res.target];
+    ui.status(`${leader.name} reached ${TARGET}! Final turn — beat ${leader.score} to win.`);
+  }
+
   function onRoll() {
     if (busy || over || engine.state().phase === 'over') return;
     rollAndPlay((res) => {
       if (res.farkle) {
         renderHud();
-        setTimeout(() => { engine.endFarkle(); afterTurnChange(); }, 1100);
+        setTimeout(() => { engine.endFarkle(); resolveTurnEnd(); }, 1100);
       } else {
         syncButtons(); updateHighlights(); renderHud(); maybeAI();
       }
@@ -374,8 +399,8 @@ export default function mount(ctx) {
   function onBank() {
     if (busy || over || !engine.canBank()) { if (!engine.canBank()) ui.status(`Need ${MIN_BANK}+ in a turn to bank.`); return; }
     const res = engine.bank();
-    if (res.won) { finishGame(); return; }
-    afterTurnChange();
+    if (res.finalRound) announceFinalRound(res);
+    resolveTurnEnd();
   }
 
   function afterTurnChange() {
@@ -388,6 +413,7 @@ export default function mount(ctx) {
     const s = engine.state();
     if (s.phase === 'over') return;
     const name = s.players[s.current].name;
+    if (s.finalRound) { ui.turn(`🏁 Final turn — ${name} must beat ${beatOf(s)}!`); return; }
     ui.turn(mode === 'ai' && s.current === 1 ? `${name} to roll…` : `${name}: your roll`);
   }
 
@@ -412,7 +438,7 @@ export default function mount(ctx) {
   function aiRoll() {
     const s = engine.state();
     rollAndPlay((res) => {
-      if (res.farkle) { renderHud(); setTimeout(() => { engine.endFarkle(); afterTurnChange(); }, 1200); return; }
+      if (res.farkle) { renderHud(); setTimeout(() => { engine.endFarkle(); resolveTurnEnd(); }, 1200); return; }
       selectAllScoring(); updateHighlights(); renderHud();
       setTimeout(aiDecide, 750);
     });
@@ -429,6 +455,7 @@ export default function mount(ctx) {
       oppScore: st.players[1 - st.current].score,
       target: TARGET,
       minBank: MIN_BANK,
+      needToBeat: st.finalRound ? beatOf(st) : null, // final round: chase past the leader, not just to the target
     }, difficulty);
 
     busy = true; syncButtons();
@@ -446,8 +473,9 @@ export default function mount(ctx) {
       renderHud();
       setTimeout(() => {
         flashBank(null); aiMsg = null;
-        const won = engine.bank().won;
-        if (won) finishGame(); else afterTurnChange();
+        const res = engine.bank();
+        if (res.finalRound) announceFinalRound(res);
+        resolveTurnEnd();
       }, AI_BANK_MS);
     }
   }
@@ -550,7 +578,10 @@ export default function mount(ctx) {
     rulesHtml: `
       <p style="margin:0 0 6px;color:#8fa3b5">A push-your-luck dice game — the “Dice” house rules (Farkle-style).</p>
       <h4>Goal</h4>
-      <ul><li>First player to <b>${TARGET}</b> points wins.</li></ul>
+      <ul>
+        <li>Reach <b>${TARGET}</b> points to trigger the <b>final round</b>.</li>
+        <li>Everyone else then gets <b>one last turn</b> to beat that score — highest total wins (a tie is held by whoever got there first).</li>
+      </ul>
       <h4>Each turn</h4>
       <ul>
         <li>Press <b>Roll</b> to throw the dice into the tray, then <b>tap the glowing (scoring) dice</b> to set them aside.</li>

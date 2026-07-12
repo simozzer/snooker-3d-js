@@ -52,6 +52,16 @@ test('a banking win is never gambled away', () => {
   }
 });
 
+test('final round: chase past the leader, banking only once the bank would overtake', () => {
+  // needToBeat = the leader's score you must OVERTAKE. Behind or level → keep rolling (a losing bank is
+  // worth the same as a farkle); ahead → take the win. Independent of difficulty temperament.
+  for (const d of ['easy', 'medium', 'hard']) {
+    assert.equal(decideRoll(ctx({ turnScore: 800, myScore: 4000, needToBeat: 5000 }), d), 'roll'); // 4800 < 5000
+    assert.equal(decideRoll(ctx({ turnScore: 1000, myScore: 4000, needToBeat: 5000 }), d), 'roll'); // 5000 ties → leader holds → not enough
+    assert.equal(decideRoll(ctx({ turnScore: 1100, myScore: 4000, needToBeat: 5000 }), d), 'bank'); // 5100 > 5000 → win
+  }
+});
+
 test('easy banks the moment it is legal; hard keeps rolling a fat hand', () => {
   const c = ctx({ turnScore: 400, diceRemaining: 6 });
   assert.equal(decideRoll(c, 'easy'), 'bank');   // 400 ≥ minBank → done

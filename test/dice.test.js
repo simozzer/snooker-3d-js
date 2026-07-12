@@ -125,20 +125,63 @@ test('three farkles in a row costs 1000 points and resets the strike count', () 
   assert.equal(g.state().players[0].strikes, 0, 'strikes reset after the penalty');
 });
 
-test('reaching the target ends the game and names the winner', () => {
+// --- final round ("last licks") ---------------------------------------------------------------
+// Bank a whole turn from one scoring roll (select every eligible die, then bank) — used to march a
+// player toward the target in the tests below.
+function bankTurn(g, values) {
+  g.roll(values);
+  for (let i = 0; i < 6; i++) if (g.eligible(i)) g.toggleSelect(i);
+  return g.bank();
+}
+// Climb both players to 4000, then A banks a fifth 1000 to hit 5000 and trigger the final round.
+function toFinalRound() {
   const g = createDice();
   g.newGame(['A', 'B']);
-  // Bank repeatedly for A until at/over TARGET. Each big turn banks 8000 (six 1s) — one is plenty.
-  g.roll([1, 1, 1, 1, 1, 1]);        // 8000, well past TARGET
-  for (let i = 0; i < 6; i++) g.toggleSelect(i);
-  assert.equal(g.selectionScore(), 8000);
-  const res = g.bank();
-  assert.equal(res.banked, true);
-  assert.equal(res.won, true);
+  for (let r = 0; r < 4; r++) { bankTurn(g, [1, 1, 1, 2, 3, 4]); bankTurn(g, [1, 1, 1, 2, 3, 4]); }
+  const res = bankTurn(g, [1, 1, 1, 2, 3, 4]); // A → 5000
+  return { g, res };
+}
+
+test('reaching the target starts a final round instead of ending the game', () => {
+  const { g, res } = toFinalRound();
+  assert.equal(res.finalRound, true, 'target reached → final round begins');
+  const s = g.state();
+  assert.notEqual(s.phase, 'over', 'the game does not end immediately');
+  assert.equal(s.finalRound, true);
+  assert.equal(s.finalTrigger, 0, 'A reached the target first');
+  assert.equal(s.current, 1, 'the trailing player gets the last turn');
+  assert.equal(s.players[0].score, 5000);
+  assert.equal(s.players[1].score, 4000);
+});
+
+test('the trailing player wins the final round by overtaking the leader', () => {
+  const { g } = toFinalRound();
+  const res = bankTurn(g, [1, 1, 1, 1, 2, 3]); // B banks four 1s = 2000 → 6000
+  assert.equal(res.over, true);
   const s = g.state();
   assert.equal(s.phase, 'over');
-  assert.equal(s.winner, 0);
-  assert.ok(s.players[0].score >= TARGET);
+  assert.equal(s.players[1].score, 6000);
+  assert.equal(s.winner, 1, 'B overtook and wins');
+});
+
+test('an exact tie in the final round is held by whoever reached the target first', () => {
+  const { g } = toFinalRound();
+  bankTurn(g, [1, 1, 1, 2, 3, 4]); // B banks 1000 → 5000, an exact tie
+  const s = g.state();
+  assert.equal(s.phase, 'over');
+  assert.equal(s.players[1].score, 5000);
+  assert.equal(s.winner, 0, 'A got there first, so A holds the tie');
+});
+
+test('if the chaser farkles in the final round, the leader wins', () => {
+  const { g } = toFinalRound();
+  g.roll([2, 3, 4, 6, 3, 2]); // farkle
+  assert.equal(g.isFarkle(), true);
+  const res = g.endFarkle();
+  assert.equal(res.over, true);
+  const s = g.state();
+  assert.equal(s.phase, 'over');
+  assert.equal(s.winner, 0, 'B failed to answer, so A wins');
 });
 
 test('constants are exported and sane', () => {

@@ -52,6 +52,11 @@ export function createDice() {
   let phase = 'await-roll';          // 'await-roll' | 'pick' | 'over'
   let farkled = false;               // last roll produced nothing scoring
   let winner = null;
+  // "Last licks": reaching the target doesn't end the game — it starts a final round where every OTHER
+  // player gets exactly one more turn to try to beat that score. Removes the go-first advantage.
+  let finalRound = false;
+  let finalTurnsLeft = 0;            // final turns still to be played before the game concludes
+  let finalTrigger = null;          // the seat that reached the target first (holds ties: got there first)
 
   function freshDice() {
     dice = Array.from({ length: NUM_DICE }, () => ({ value: 0, held: false, picked: false }));
@@ -136,7 +141,28 @@ export function createDice() {
     startTurn();
   }
 
-  // Bank the turn: commit the selection, credit the player, check for a win, pass the dice on.
+  // Conclude the game after the final round: the highest score wins; a tie is held by whoever reached
+  // the target first (finalTrigger). Sets the winner and ends play.
+  function conclude() {
+    let best = -Infinity;
+    for (const pl of players) if (pl.score > best) best = pl.score;
+    winner = (finalTrigger != null && players[finalTrigger].score === best)
+      ? finalTrigger
+      : players.findIndex((pl) => pl.score === best);
+    phase = 'over';
+  }
+
+  // Count a turn's end during the final round; conclude once every chaser has answered.
+  // Returns true if the game is now over.
+  function tickFinalRound() {
+    if (!finalRound) return false;
+    finalTurnsLeft -= 1;
+    if (finalTurnsLeft <= 0) { conclude(); return true; }
+    return false;
+  }
+
+  // Bank the turn: commit the selection, credit the player, then either start/continue the final round
+  // (reaching the target no longer wins outright) or pass the dice on.
   function bank() {
     if (!canBank()) return { banked: false, won: false };
     turnScore += selectionScore();
@@ -144,21 +170,26 @@ export function createDice() {
     const p = players[current];
     p.score += turnScore;
     p.strikes = 0;
-    if (p.score >= TARGET) {
-      winner = current;
-      phase = 'over';
-      return { banked: true, won: true, player: current };
+    // First to reach the target starts the final round; everyone else gets one last turn to beat it.
+    if (!finalRound && p.score >= TARGET) {
+      finalRound = true;
+      finalTrigger = current;
+      finalTurnsLeft = players.length - 1;
+      advance();
+      return { banked: true, won: false, finalRound: true, target: current };
     }
+    if (tickFinalRound()) return { banked: true, won: winner === current, over: true };
     advance();
     return { banked: true, won: false };
   }
 
-  // Resolve a farkled roll: lose the turn's points, record a strike (three in a row = penalty),
-  // and pass to the next player.
+  // Resolve a farkled roll: lose the turn's points, record a strike (three in a row = penalty), then
+  // (during the final round) count the answered turn, else pass to the next player.
   function endFarkle() {
     const p = players[current];
     p.strikes = (p.strikes || 0) + 1;
     if (p.strikes >= 3) { p.score = Math.max(0, p.score - STRIKE_PENALTY); p.strikes = 0; }
+    if (tickFinalRound()) return { player: current, over: true };
     advance();
     return { player: current };
   }
@@ -168,6 +199,7 @@ export function createDice() {
       players = names.map((name) => ({ name, score: 0, strikes: 0 }));
       current = 0;
       winner = null;
+      finalRound = false; finalTurnsLeft = 0; finalTrigger = null;
       startTurn();
     },
     roll,
@@ -191,6 +223,8 @@ export function createDice() {
         phase,
         farkled,
         winner,
+        finalRound,
+        finalTrigger,
         minBank: MIN_BANK,
         target: TARGET,
       };

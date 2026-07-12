@@ -71,14 +71,19 @@ export function bankThreshold(n, difficulty) {
   return Math.min(base, 4000);                          // hard: full break-even, capped for sanity
 }
 
-// The one decision. ctx = { turnScore, diceRemaining, myScore, oppScore, target, minBank }.
-// Returns 'roll' or 'bank'.
+// The one decision. ctx = { turnScore, diceRemaining, myScore, oppScore, target, minBank, needToBeat? }.
+// `needToBeat` (set only in the FINAL ROUND when chasing a player who's already home) is the score you
+// must OVERTAKE to win. Returns 'roll' or 'bank'.
 export function decideRoll(ctx, difficulty = 'medium') {
-  const { turnScore, diceRemaining, myScore, oppScore, target, minBank } = ctx;
+  const { turnScore, diceRemaining, myScore, oppScore, target, minBank, needToBeat = null } = ctx;
   const n = live(diceRemaining);
 
   // You can't bank below the minimum, so there's nothing to lose by rolling — always roll.
   if (turnScore < minBank) return 'roll';
+
+  // Final round, chasing: a banked-but-losing score is worth the same as a farkle (you lose either
+  // way), so keep rolling until banking would actually OVERTAKE the leader; then take the win.
+  if (needToBeat != null) return (myScore + turnScore > needToBeat) ? 'bank' : 'roll';
 
   // Never gamble a win: if banking now reaches the target, take it. (Basic sense — all tiers.)
   if (myScore + turnScore >= target) return 'bank';

@@ -73,6 +73,15 @@ export default function mount(ctx) {
   let playback = null;            // active roll trajectory being played back
   let aiMsg = null;               // a transient line shown while the AI deliberates (bank vs roll on)
 
+  // Online play: the roller is authoritative and ships its resting state each turn (the same model the
+  // 3D cue games use). onlineSeat is our seat (0/1), or -1 when playing locally vs the AI / hot-seat.
+  let onlineSeat = -1;
+  let gameOverSent = false;       // report a finished online game to the relay only once
+  const isOnline = () => onlineSeat >= 0 && !!ctx.net?.isOnline();
+  const otherSeat = () => 1 - onlineSeat;
+  const myTurn = () => engine.state().current === onlineSeat;
+  const netSend = (payload, next) => ctx.net.send(payload, next);
+
   // Deliberate AI pacing so its bank-or-risk decision is readable — it "considers the Bank button",
   // then pauses BEFORE rolling again (or holds a beat as it banks) rather than snapping through its turn.
   const AI_ROLLON_MS = 1050;      // it COULD bank but chooses to risk another roll — a real gamble, held longest
@@ -315,37 +324,22 @@ export default function mount(ctx) {
 
   const nextSeed = () => (seedCounter = (seedCounter * 1664525 + 1013904223) >>> 0);
   const MAX_REROLLS = 6; // safety cap so a pathological throw can never loop forever
+  // A deterministic sub-seed stream from one base seed. Online, both clients derive the SAME re-roll
+  // seeds from the roller's base seed, so the tumble (and its cocked re-rolls) replays identically.
+  const seedSeq = (base) => { let s = base >>> 0; return () => (s = (s * 1664525 + 1013904223) >>> 0); };
 
-  // Roll the live dice, play the throw back, then commit the settled faces to the Farkle engine. A die
-  // that lands COCKED (didn't lie flat) is picked up and thrown again on its own — just like at a real
-  // table — while the dice that landed flat stay exactly where they are; only when every die is flat do
-  // we read the faces. `onSettled` fires once, with the final result.
-  function rollAndPlay(onSettled) {
-    const s = engine.state();
-    const thrown = thrownIndices();
-    const firstRoll = s.phase === 'await-roll';
-    busy = true; syncButtons(); renderHud();
-    clearTableForThrow(thrown);
-
+  // Animate a throw of `thrown` (engine indices) seeded from `baseSeed`, WITHOUT touching the engine. A
+  // die that lands COCKED (didn't lie flat) is picked up and thrown again on its own — just like at a
+  // real table — while the flat dice stay put (held as obstacles). Calls done(valueByIdx) once every die
+  // is flat. Used both for local rolls and for replaying a peer's relayed roll.
+  function animateThrow(thrown, baseSeed, done) {
+    const seq = seedSeq(baseSeed);
     const finalPose = {}; // engine idx → last settled { p, q } (re-rolls read the flat dice as obstacles)
     const value = {};     // engine idx → settled face value
     let rerolls = 0;
-
-    const commit = () => {
-      if (rerolls > 0) ui.status(null); // clear the "re-rolling" note
-      const values = thrown.map((i) => value[i]);
-      const res = firstRoll ? engine.roll(values) : engine.rollAgain(values);
-      busy = false;
-      placeDice(); renderHud(); syncButtons();
-      onSettled(res);
-    };
-
-    // Throw `slots` (engine indices) as dynamic dice; every other thrown die rests as an obstacle so a
-    // re-rolled die can't land on top of one. Record each die's pose/value/flatness, then re-roll any
-    // that came up cocked (capped), or commit once all are flat.
     const throwSlots = (slots) => {
       const obstacles = thrown.filter((i) => !slots.includes(i)).map((i) => finalPose[i]);
-      const result = createDiceSim({ count: slots.length }).simulate(nextSeed(), obstacles);
+      const result = createDiceSim({ count: slots.length }).simulate(seq(), obstacles);
       playback = {
         thrown: slots,
         frames: result.frames,
@@ -365,14 +359,59 @@ export default function mount(ctx) {
             setTimeout(() => throwSlots(cocked), 650);
             return;
           }
-          commit();
+          if (rerolls > 0) ui.status(null); // clear the "re-rolling" note
+          done(value);
         },
       };
       applyFrame(0); // lift the thrown dice to their airborne start now, before the next paint
     };
-
     throwSlots(thrown);
   }
+
+  // Roll the live dice locally, animate, commit the settled faces to the engine, and (online) relay the
+  // roll to the peer so they replay the same tumble. `onSettled` fires once, with the engine result.
+  function rollAndPlay(onSettled) {
+    const s = engine.state();
+    const thrown = thrownIndices();
+    const firstRoll = s.phase === 'await-roll';
+    const baseSeed = nextSeed();
+    busy = true; syncButtons(); renderHud();
+    clearTableForThrow(thrown);
+    animateThrow(thrown, baseSeed, (value) => {
+      const values = thrown.map((i) => value[i]);
+      const res = firstRoll ? engine.roll(values) : engine.rollAgain(values);
+      busy = false;
+      placeDice(); renderHud(); syncButtons();
+      if (isOnline()) netSend({ roll: { seed: baseSeed, thrown }, state: engine.state() }, onlineSeat); // a roll keeps the turn
+      onSettled(res);
+    });
+  }
+
+  // Replay a peer's relayed roll: tumble the dice for flavour, then SNAP them to the authoritative faces
+  // the roller shipped (exactly the 3D cue games' "animate then snap"). Snapping to the relayed state —
+  // rather than trusting the tumble to land identically — keeps the peer correct without depending on
+  // bit-for-bit physics determinism across machines.
+  function applyRemoteRoll(payload) {
+    const { seed, thrown } = payload.roll;
+    busy = true; syncButtons(); renderHud();
+    clearTableForThrow(thrown);
+    animateThrow(thrown, seed, () => {
+      engine.load(payload.state);
+      busy = false;
+      placeDice();
+      const st = engine.state();
+      thrown.forEach((idx, k) => { if (!st.dice[idx].held) snapDieToValue(diceMeshes[idx], st.dice[idx].value, seed + k); });
+      updateHighlights(); renderHud(); syncButtons();
+      afterRemoteState(payload.state, /* rolled */ true);
+    });
+  }
+
+  // Rest a tumbled die flat showing `value`, at a natural (non-grid) heading — used to snap a peer's
+  // rolled dice onto the authoritative faces while keeping where each one landed.
+  const snapDieToValue = (mesh, value, yawKey) => {
+    const spin = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ((yawKey >>> 0) % 360) * Math.PI / 180);
+    mesh.quaternion.copy(spin.multiply(restQuatFor(value)));
+  };
 
   function stepPlayback() {
     if (!playback) return;
@@ -401,6 +440,7 @@ export default function mount(ctx) {
   // ---- turn flow ----------------------------------------------------------------------------
   function humanControlling() {
     const s = engine.state();
+    if (isOnline()) return ctx.net.isReady() && s.current === onlineSeat;
     return mode === 'human' || s.current === 0;
   }
 
@@ -422,10 +462,15 @@ export default function mount(ctx) {
 
   function onRoll() {
     if (busy || over || engine.state().phase === 'over') return;
+    if (isOnline() && (!ctx.net.isReady() || !myTurn())) return; // only the turn-holder rolls
     rollAndPlay((res) => {
       if (res.farkle) {
         renderHud();
-        setTimeout(() => { engine.endFarkle(); resolveTurnEnd(); }, 1100);
+        setTimeout(() => {
+          engine.endFarkle();
+          if (isOnline()) relayTurnEnd(); // the roller hands the turn off after a bust
+          resolveTurnEnd();
+        }, 1100);
       } else {
         syncButtons(); updateHighlights(); renderHud(); maybeAI();
       }
@@ -434,8 +479,10 @@ export default function mount(ctx) {
 
   function onBank() {
     if (busy || over || !engine.canBank()) { if (!engine.canBank()) ui.status(`Need ${MIN_BANK}+ in a turn to bank.`); return; }
+    if (isOnline() && !myTurn()) return;
     const res = engine.bank();
     if (res.finalRound) announceFinalRound(res);
+    if (isOnline()) relayTurnEnd(); // banking passes the turn (or ends the final round)
     resolveTurnEnd();
   }
 
@@ -448,6 +495,13 @@ export default function mount(ctx) {
   function announceTurn() {
     const s = engine.state();
     if (s.phase === 'over') return;
+    if (isOnline()) {
+      if (!ctx.net.isReady()) { ui.turn('Waiting for an opponent to join…'); return; }
+      const mine = s.current === onlineSeat;
+      const tail = s.finalRound ? ` · 🏁 beat ${beatOf(s)} to win` : '';
+      ui.turn((mine ? 'Your roll' : 'Opponent’s turn') + tail);
+      return;
+    }
     const name = s.players[s.current].name;
     if (s.finalRound) { ui.turn(`🏁 Final turn — ${name} must beat ${beatOf(s)}!`); return; }
     ui.turn(mode === 'ai' && s.current === 1 ? `${name} to roll…` : `${name}: your roll`);
@@ -460,11 +514,70 @@ export default function mount(ctx) {
     placeDice(); syncButtons(); renderHud();
   }
 
+  // ---- online play (optional harness contract; see web/board.js + web/net.js) -----------------
+  // Ship the authoritative post-state to the peer when the turn passes (bank / bust), then report the
+  // result if the game just ended (both clients report; the relay dedupes per room).
+  function relayTurnEnd() {
+    netSend({ state: engine.state() }, otherSeat());
+    maybeReportGameOver();
+  }
+  function maybeReportGameOver() {
+    const s = engine.state();
+    if (s.phase === 'over' && isOnline() && !gameOverSent) { gameOverSent = true; ctx.net.sendGameOver(s.winner); }
+  }
+
+  // A peer action arrived. A roll carries { roll, state } — animate the tumble, then snap. Anything else
+  // is a pure state update (selection, bank, bust, turn hand-off) we load straight in.
+  function applyRemoteMove(payload) {
+    if (!payload || over) return;
+    if (payload.roll) { applyRemoteRoll(payload); return; }
+    engine.load(payload.state);
+    busy = false;
+    placeDice(); updateHighlights(); renderHud(); syncButtons();
+    afterRemoteState(payload.state, /* rolled */ false);
+  }
+
+  // After loading a peer's state: show a bust, the final round, a turn hand-off, or the game result.
+  function afterRemoteState(s, rolled) {
+    if (s.phase === 'over') { finishGame(); maybeReportGameOver(); return; }
+    if (rolled && s.farkled) { renderHud(); return; } // the roller relays the bust hand-off next
+    announceTurn();
+  }
+
+  // Enter online play at our seat: fresh game (or replay the log a mid-game join hands us), then paint.
+  function onlineStart({ seat, players = [], log = [] }) {
+    onlineSeat = seat; gameOverSent = false;
+    over = false; busy = false; playback = null; aiMsg = null; flashBank(null);
+    mode = 'online';
+    engine.newGame(onlineNames(players));
+    applyLog(log);
+    ui.result(over ? winMsg(engine.state().players[engine.state().winner].name) : null); ui.setUndo(false);
+    resize(); placeDice(); updateHighlights(); syncButtons(); renderHud(); announceTurn();
+  }
+  function setOnlineReady() { syncButtons(); renderHud(); announceTurn(); } // ready-state changed → repaint
+  function onlineResync(log = []) {
+    over = false; busy = false; playback = null;
+    applyLog(log);
+    placeDice(); updateHighlights(); syncButtons(); renderHud();
+    if (over) finishGame(); else announceTurn();
+  }
+  // Seat-ordered player names so both clients agree; fall back until a seat's name is known.
+  function onlineNames(players) {
+    const names = ['Player 1', 'Player 2'];
+    for (const p of players || []) if (p && p.seat != null && p.name) names[p.seat] = p.name;
+    return names;
+  }
+  // Rebuild from the authoritative move-log: the last relayed state is the truth.
+  function applyLog(log = []) {
+    const last = [...(log || [])].reverse().find((e) => e && e.payload && e.payload.state);
+    if (last) { engine.load(last.payload.state); over = engine.state().phase === 'over'; }
+  }
+
   // ---- AI -----------------------------------------------------------------------------------
   // The computer keeps every scoring die, then asks the shared gambling brain (src/board/dice-ai.js)
   // whether to bank or roll on — an exact expected-value call tempered by the chosen difficulty.
   function maybeAI() {
-    if (mode !== 'ai' || over) return;
+    if (mode !== 'ai' || over || isOnline()) return; // online play never runs a local AI — the peer is real
     const s = engine.state();
     if (s.phase === 'over' || s.current !== 1) return;
     busy = true; syncButtons(); renderHud();
@@ -547,14 +660,18 @@ export default function mount(ctx) {
     const hit = rayc.intersectObjects(live, false)[0];
     if (!hit) return;
     const i = hit.object.userData.index;
-    if (engine.toggleSelect(i)) { updateHighlights(); renderHud(); syncButtons(); }
+    if (engine.toggleSelect(i)) {
+      updateHighlights(); renderHud(); syncButtons();
+      if (isOnline()) netSend({ state: engine.state() }, onlineSeat); // show my selection to the peer; turn stays with me
+    }
   }
 
   // ---- buttons ------------------------------------------------------------------------------
   function syncButtons() {
     const s = engine.state();
-    const aiTurn = mode === 'ai' && s.current === 1;
-    const lock = busy || over || aiTurn;
+    const notMyTurn = (mode === 'ai' && s.current === 1)
+      || (isOnline() && (!ctx.net.isReady() || s.current !== onlineSeat));
+    const lock = busy || over || notMyTurn;
     rollBtn.disabled = lock || s.phase === 'over' || s.farkled
       || (s.phase === 'pick' && !engine.canRoll());
     bankBtn.disabled = lock || !engine.canBank();
@@ -584,6 +701,7 @@ export default function mount(ctx) {
   // ---- controller ---------------------------------------------------------------------------
   const controller = {
     newGame() {
+      onlineSeat = -1; gameOverSent = false; // a fresh local game leaves online play
       over = false; busy = false; playback = null; aiMsg = null; flashBank(null);
       mode = ctx.getMode(); difficulty = ctx.getDifficulty();
       const names = mode === 'ai' ? ['You', 'Computer'] : ['Player 1', 'Player 2'];
@@ -591,8 +709,12 @@ export default function mount(ctx) {
       ui.result(null); ui.setUndo(false);
       resize(); placeDice(); announceTurn(); syncButtons(); renderHud();
     },
-    setMode(m) { mode = m; controller.newGame(); },
+    setMode(m) { mode = m; if (m !== 'online') controller.newGame(); }, // online games start via onlineStart
     setDifficulty(d) { difficulty = d; },
+    onlineStart,
+    setOnlineReady,
+    applyRemoteMove,
+    onlineResync,
     undo() { /* dice are already cast — no meaningful undo */ },
     resize,
     // ---- test/debug hooks (see window.boardController) ----
@@ -604,7 +726,7 @@ export default function mount(ctx) {
       const rect = canvas.getBoundingClientRect();
       return { x: rect.left + (v.x * 0.5 + 0.5) * rect.width, y: rect.top + (-v.y * 0.5 + 0.5) * rect.height };
     },
-    peek() { return { ...engine.state(), busy, over }; },
+    peek() { return { ...engine.state(), busy, over, onlineSeat, online: isOnline() }; },
     // Settled orientation of each currently-in-tray (not railed) die, for smoke tests: the world-space
     // up-face verticality (1 = perfectly flat) and the heading (yaw about the vertical, degrees).
     dicePoses() {
@@ -615,10 +737,10 @@ export default function mount(ctx) {
         const d = s.dice[i];
         if (d.held || !diceMeshes[i].visible) continue;
         const q = diceMeshes[i].quaternion;
-        let best = -Infinity;
-        for (const f of FACES) best = Math.max(best, new THREE.Vector3(f.n.x, f.n.y, f.n.z).applyQuaternion(q).dot(up));
+        let best = -Infinity, value = 0;
+        for (const f of FACES) { const y = new THREE.Vector3(f.n.x, f.n.y, f.n.z).applyQuaternion(q).dot(up); if (y > best) { best = y; value = f.value; } }
         const fwd = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
-        out.push({ upFaceY: best, yaw: Math.atan2(fwd.z, fwd.x) * 180 / Math.PI });
+        out.push({ index: i, upFaceY: best, value, yaw: Math.atan2(fwd.z, fwd.x) * 180 / Math.PI });
       }
       return out;
     },
@@ -634,6 +756,10 @@ export default function mount(ctx) {
       <ul>
         <li>Reach <b>${TARGET}</b> points to trigger the <b>final round</b>.</li>
         <li>Everyone else then gets <b>one last turn</b> to beat that score — highest total wins (a tie is held by whoever got there first).</li>
+      </ul>
+      <h4>Play</h4>
+      <ul>
+        <li>Play a friend online (<b>Play online</b> → create a room or join with a code), or solo against the computer.</li>
       </ul>
       <h4>Each turn</h4>
       <ul>

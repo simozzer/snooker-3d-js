@@ -213,7 +213,8 @@ export function createDice() {
     canBank,
     isFarkle: () => farkled,
     liveFaces,
-    // A read-only snapshot for the view to render from.
+    // A read-only snapshot for the view to render from. Also complete enough to reconstruct the game
+    // verbatim via load() — used to net the game by transferring the roller's authoritative state.
     state() {
       return {
         dice: dice.map((d) => ({ ...d })),
@@ -224,10 +225,26 @@ export function createDice() {
         farkled,
         winner,
         finalRound,
+        finalTurnsLeft,
         finalTrigger,
         minBank: MIN_BANK,
         target: TARGET,
       };
+    },
+    // Restore a full game from a state() snapshot (online play: the shooter is authoritative and ships
+    // its resting state each turn, exactly as the 3D cue games do). Copies are taken so the caller's
+    // snapshot can't alias our internals.
+    load(snap) {
+      dice = snap.dice.map((d) => ({ ...d }));
+      players = snap.players.map((p) => ({ ...p }));
+      current = snap.current;
+      turnScore = snap.turnScore;
+      phase = snap.phase;
+      farkled = snap.farkled;
+      winner = snap.winner;
+      finalRound = snap.finalRound;
+      finalTurnsLeft = snap.finalTurnsLeft || 0;
+      finalTrigger = snap.finalTrigger ?? null;
     },
   };
 }

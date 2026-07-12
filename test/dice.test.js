@@ -184,6 +184,43 @@ test('if the chaser farkles in the final round, the leader wins', () => {
   assert.equal(s.winner, 0, 'B failed to answer, so A wins');
 });
 
+// --- state transfer (online play) -------------------------------------------------------------
+// The online netting ships one player's authoritative state() to the peer, who load()s it. A snapshot
+// must round-trip exactly, mid-turn detail (held/picked dice, turn score, strikes, final round) and all.
+test('load() restores a state() snapshot verbatim, mid-turn detail included', () => {
+  const a = createDice();
+  a.newGame(['Host', 'Guest']);
+  a.roll([1, 1, 1, 5, 2, 3]);           // 1000 + a 5
+  a.toggleSelect(0); a.toggleSelect(1); a.toggleSelect(2); // keep the three 1s, leave the 5 live
+  const snap = a.state();
+
+  const b = createDice();
+  b.newGame(['Host', 'Guest']);
+  b.load(snap);
+  assert.deepEqual(b.state(), snap, 'the reloaded snapshot matches the original');
+  // the reloaded engine sees the same in-flight selection, and plays on identically
+  assert.equal(b.selectionScore(), a.selectionScore(), 'the picked-dice selection survives the transfer');
+  assert.equal(b.selectionScore(), 1000);
+  assert.equal(b.rollAgain([5, 2, 3]).farkle, a.rollAgain([5, 2, 3]).farkle, 'roll-on behaves identically');
+  assert.deepEqual(b.state(), a.state(), 'still in lockstep after an identical roll-on');
+});
+
+test('load() carries the final round across to the peer', () => {
+  const a = createDice();
+  a.newGame(['Host', 'Guest']);
+  a.load({
+    dice: Array.from({ length: 6 }, () => ({ value: 0, held: false, picked: false })),
+    players: [{ name: 'Host', score: 5000, strikes: 0 }, { name: 'Guest', score: 4000, strikes: 0 }],
+    current: 1, turnScore: 0, phase: 'await-roll', farkled: false, winner: null,
+    finalRound: true, finalTurnsLeft: 1, finalTrigger: 0, minBank: 350, target: 5000,
+  });
+  const s = a.state();
+  assert.equal(s.finalRound, true);
+  assert.equal(s.finalTurnsLeft, 1);
+  assert.equal(s.finalTrigger, 0);
+  assert.equal(s.current, 1);
+});
+
 test('constants are exported and sane', () => {
   assert.equal(MIN_BANK, 350);
   assert.ok(TARGET >= MIN_BANK);

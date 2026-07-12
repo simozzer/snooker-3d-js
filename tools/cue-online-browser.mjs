@@ -169,3 +169,43 @@ test('online snooker: the browser guest animates the host break, snaps to it, th
 
   assert.deepEqual(jsErrors, [], `unexpected JS errors: ${jsErrors.join(' | ')}`);
 });
+
+test('online snooker: the guest can recall the opponent\'s foul-and-a-miss', async (t) => {
+  if (guard(t)) return;
+
+  // Re-enter online with a fresh room (leave the previous one by toggling the Opponent mode).
+  await evaluate(`(()=>{const s=document.getElementById('aimode'); s.value='ai'; s.dispatchEvent(new Event('change'));})()`);
+  await sleep(150);
+  const h2 = new RelayClient({ url: RELAY_URL, autoReconnect: false });
+  await h2.connect();
+  const room = await h2.create({ game: 'snooker', seats: 2 });
+  await evaluate(`(()=>{const s=document.getElementById('aimode'); s.value='online'; s.dispatchEvent(new Event('change'));})()`);
+  assert.ok(await waitFor(`document.getElementById('netstat').classList.contains('online')`, { timeout: 10000 }), 'browser never reconnected');
+  await evaluate(`(()=>{const c=document.getElementById('net-code'); c.value=${JSON.stringify(room.code)}; document.getElementById('net-join').click();})()`);
+  assert.ok(await waitFor(`window.__cue.active() && window.__cue.seat() === 1`, { timeout: 8000 }), 'browser did not join the new room');
+
+  // The host breaks and relays it AS a foul-and-a-miss (payload carries the pre-shot table + miss flag,
+  // turn handed to the guest) — exactly the shape render3d.js sends when lastOutcome.miss.
+  const A = newGame(snooker, { rng: mulberry32(room.seed) });
+  const preShot = serializeTable(A);
+  const shot = breakShot(A);
+  takeShot(A, shot);
+  const payload = { ...shotPayload(shot, A), miss: true, preShot };
+  payload.frame = JSON.parse(JSON.stringify(payload.frame)); payload.frame.turn = 1;
+  h2.sendMove(payload, 1);
+
+  // The guest animates it, snaps, then the miss prompt appears — and recall must be queued for relay.
+  assert.ok(await waitFor(`document.getElementById('missprompt').classList.contains('show')`, { timeout: 20000 }),
+    'the miss prompt did not appear for the incoming player');
+  const gotRecall = moveFrom(h2, 1);
+  await evaluate(`document.getElementById('miss-again').click()`); // "make them play again"
+  const rm = await gotRecall;
+  assert.equal(rm.payload.recall, true, 'the guest relayed a recall');
+  assert.equal(JSON.stringify(rm.payload.pieces), JSON.stringify(preShot.pieces), 'recall restores the pre-shot layout');
+
+  // The guest is now waiting on the offender (turn handed back), its own table restored to the pre-shot one.
+  assert.ok(await waitFor(`window.__cue.turn() === 0`, { timeout: 4000 }), 'turn not handed back to the offender');
+  assert.equal(await evaluate(`JSON.stringify(window.__cue.table().pieces)`), JSON.stringify(preShot.pieces), 'guest table not restored');
+  assert.deepEqual(jsErrors, [], `unexpected JS errors: ${jsErrors.join(' | ')}`);
+  h2.close();
+});

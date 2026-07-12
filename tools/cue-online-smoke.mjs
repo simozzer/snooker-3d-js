@@ -115,6 +115,48 @@ test('two cue-game clients stay in lockstep by transferring the resting table ea
   host.close(); guest.close();
 });
 
+test('a foul-and-a-miss can be recalled: the pre-shot table is relayed back to the offender', async () => {
+  const host = new RelayClient({ url, autoReconnect: false }); await host.connect();
+  const created = await host.create({ game: 'snooker', seats: 2 });
+  const guest = new RelayClient({ url, autoReconnect: false }); await guest.connect();
+  const joinP = guest.join(created.code);
+  await waitFor(host, 'peer-joined');
+  await joinP;
+
+  const A = newGame(snooker, { rng: mulberry32(created.seed) }); // offender (seat 0)
+  const B = newGame(snooker, { rng: mulberry32(created.seed) }); // incoming (seat 1)
+
+  // Seat 0 shoots and relays it AS a foul-miss: the payload also carries the PRE-shot table so seat 1
+  // can offer to make them play again (the exact shape render3d.js sends when lastOutcome.miss).
+  const preShot = serializeTable(A);
+  const shot = pickShot(A, 0, created.seed);
+  takeShot(A, shot);
+  const payload = { ...shotPayload(shot, A), miss: true, preShot };
+  payload.frame = structuredClone(payload.frame); payload.frame.turn = 1; // hand the incoming player the choice
+  const toGuest = moveFrom(guest, host.seat);
+  host.sendMove(payload, 1);
+  const gm = await toGuest;
+  assert.equal(gm.payload.miss, true, 'miss flag relayed');
+  assert.ok(gm.payload.preShot && gm.payload.preShot.pieces, 'pre-shot table relayed');
+  applyTable(B, gm.payload); // seat 1 applies the post-shot state
+
+  // Seat 1 recalls: restore the pre-shot table, KEEP the penalty scores, hand the turn back to seat 0.
+  const keep = Array.isArray(B.frame.scores) ? [...B.frame.scores] : null;
+  applyTable(B, gm.payload.preShot);
+  if (keep) B.frame.scores = keep;
+  const recall = { recall: true, pieces: serializeTable(B).pieces, frame: B.frame };
+  const toHost = moveFrom(host, guest.seat);
+  guest.sendMove(recall, 0);
+  const rm = await toHost;
+  assert.equal(rm.payload.recall, true, 'recall flag relayed');
+  applyTable(A, rm.payload); // offender jumps back to the restored position
+
+  assert.equal(JSON.stringify(serializeTable(A).pieces), JSON.stringify(preShot.pieces), 'offender restored to the pre-shot layout');
+  assert.equal(A.frame.turn, 0, 'the turn is handed back to the offender');
+  if (keep) assert.deepEqual(A.frame.scores, keep, 'the opponent keeps the penalty points');
+  host.close(); guest.close();
+});
+
 test('a late joiner resyncs from the last authoritative snapshot in the log', async () => {
   const host = new RelayClient({ url, autoReconnect: false }); await host.connect();
   const created = await host.create({ game: 'snooker', seats: 2 });

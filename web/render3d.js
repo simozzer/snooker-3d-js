@@ -622,6 +622,8 @@ let sendOnSettle = false;   // the shot that just resolved is a LOCAL one to rel
 let lastLocalShot = null;   // the shot object to relay at settle
 let resultReported = false; // has this frame's result been tallied to the relay yet? (once per frame)
 let remoteQueue = [];       // peer shots that arrived while we were busy — pumped when idle
+let lastRemotePayload = null; // the most recently APPLIED peer payload (to detect a relayed foul-miss)
+let onlineMissPreShot = null; // the pre-shot table to restore if we recall the opponent's miss
 const onlineActive = () => !!online && online.started();
 const isMyTurn = () => !!game && !!game.frame && game.frame.turn === mySeat;
 const canPlayLocally = () => !onlineMode() || (onlineActive() && isMyTurn() && !applyingRemote);
@@ -701,9 +703,22 @@ function onOnlineRematch(seed) {
 // A peer's shot arrived. Queue it (it may land mid-animation of our own shot) and pump when idle.
 function applyRemoteShot(payload) { remoteQueue.push(payload); pumpRemote(); }
 function pumpRemote() {
-  if (!onlineActive() || applyingRemote || playing || replaying || pauseThen || aiLineup || aiPlace) return;
+  if (!onlineActive() || applyingRemote || playing || replaying || pauseThen || aiLineup || aiPlace || awaitingMiss) return;
   if (!remoteQueue.length) return;
   const payload = remoteQueue.shift();
+  lastRemotePayload = payload;
+  if (payload.recall) {
+    // The opponent recalled OUR miss: no shot to animate — snap to the restored pre-shot position and
+    // play again from there (the opponent kept their penalty; it's our turn).
+    applyTable(game, payload);
+    syncBallMeshes(game.pieces); orient.clear(); updateScore();
+    status.textContent = 'Miss called — play again from the original position.';
+    if (game.frame.ballInHand && canPlayLocally()) beginBallInHand(); else endBallInHand();
+    if (canPlayLocally()) { resetHumanControls(); setSuggestedAim(); }
+    refreshHumanPreview(); syncOnlineTurnUI();
+    setTimeout(pumpRemote, 50);
+    return;
+  }
   remotePending = payload; applyingRemote = true; sendOnSettle = false; shotIsAi = false;
   status.textContent = 'Opponent is at the table…';
   playShot(payload.shot); // animate their shot locally; we SNAP to remotePending when it settles
@@ -718,10 +733,45 @@ function applyRemoteSnapIfPending() {
 // a finished frame, refresh the turn UI, and pump the next queued peer shot.
 function settleOnline() {
   if (!onlineActive()) return;
-  if (sendOnSettle) { online.sendShot(shotPayload(lastLocalShot, game), game.frame.turn); sendOnSettle = false; }
+  const wasLocal = sendOnSettle;
+  if (sendOnSettle) {
+    const payload = shotPayload(lastLocalShot, game);
+    // Foul-and-a-miss: also ship the PRE-shot table so the incoming player can recall it (make us
+    // play again). The shooter is authoritative, so the recall is just another state transfer.
+    if (lastOutcome && lastOutcome.miss && lastPreShot && !game.frame.frameOver) {
+      payload.miss = true;
+      payload.preShot = serializeTable({ pieces: lastPreShot.pieces, frame: lastPreShot.frame });
+    }
+    online.sendShot(payload, game.frame.turn);
+    sendOnSettle = false;
+  }
   if (game.frame.frameOver) reportOnlineResult();
+  // Incoming player after a relayed foul-miss: offer the recall choice (reuses the miss prompt).
+  else if (!wasLocal && lastRemotePayload && lastRemotePayload.miss && lastRemotePayload.preShot && isMyTurn()) {
+    const preShot = lastRemotePayload.preShot;
+    lastRemotePayload = null;
+    offerOnlineMissChoice(preShot);
+  }
   syncOnlineTurnUI();
   setTimeout(pumpRemote, 50); // small beat before animating the opponent's next shot
+}
+// The incoming player's choice after the opponent fouled AND missed (online). Reuses the #missprompt.
+function offerOnlineMissChoice(preShot) {
+  onlineMissPreShot = preShot;
+  awaitingMiss = true;
+  el('mp-sub').textContent = 'Your opponent could have hit the ball on. Play the position, or make them play again?';
+  el('missprompt').classList.add('show');
+}
+// Recall the opponent's miss: restore the pre-shot table (they keep the penalty), hand the turn back to
+// them, and relay that restored state so their client jumps back to it too.
+function onlineRecallMiss(preShot) {
+  const keepScores = Array.isArray(game.frame.scores) ? [...game.frame.scores] : null;
+  applyTable(game, preShot); // pre-shot pieces + frame → turn is the offender's again
+  if (keepScores) game.frame.scores = keepScores; // ...but the penalty points stand
+  syncBallMeshes(game.pieces); orient.clear(); updateScore();
+  status.textContent = 'Miss called — opponent must play again.';
+  online.sendShot({ recall: true, pieces: serializeTable(game).pieces, frame: game.frame }, game.frame.turn);
+  syncOnlineTurnUI();
 }
 function reportOnlineResult() {
   if (resultReported) return;
@@ -734,7 +784,7 @@ function syncOnlineTurnUI() {
   if (!onlineMode()) return;
   const playBtn = el('play');
   if (!onlineActive()) { playBtn.disabled = true; return; }
-  playBtn.disabled = !isMyTurn() || game.frame.frameOver || playing || applyingRemote;
+  playBtn.disabled = !isMyTurn() || game.frame.frameOver || playing || applyingRemote || awaitingMiss;
   updateTurnPrompt();
 }
 
@@ -1502,8 +1552,21 @@ function offerMissChoice() {
   el('mp-sub').textContent = `${playerLabel(lastShooter)} could have hit the ball on. Play the position, or make them play again?`;
   el('missprompt').classList.add('show');
 }
-el('miss-play').addEventListener('click', () => { el('missprompt').classList.remove('show'); awaitingMiss = false; recallCount = 0; finishHandoff(); });
-el('miss-again').addEventListener('click', () => { el('missprompt').classList.remove('show'); awaitingMiss = false; recallMiss(); });
+el('miss-play').addEventListener('click', () => {
+  el('missprompt').classList.remove('show'); awaitingMiss = false;
+  if (onlineActive()) { // online: play the position — the table is already set up at our turn
+    onlineMissPreShot = null;
+    if (game.frame.ballInHand && canPlayLocally()) beginBallInHand(); else endBallInHand();
+    if (canPlayLocally()) { resetHumanControls(); setSuggestedAim(); }
+    refreshHumanPreview(); syncOnlineTurnUI(); return;
+  }
+  recallCount = 0; finishHandoff();
+});
+el('miss-again').addEventListener('click', () => {
+  el('missprompt').classList.remove('show'); awaitingMiss = false;
+  if (onlineActive()) { const p = onlineMissPreShot; onlineMissPreShot = null; if (p) onlineRecallMiss(p); return; }
+  recallMiss();
+});
 
 // Switch game (snooker / 8-ball / 9-ball): swap the variant, rebuild the table + camera for its
 // dimensions, drop the old balls, and rack a fresh frame. Physics/rules/AI follow the variant.

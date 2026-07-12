@@ -25,7 +25,7 @@ const q6 = (n) => Math.round(n * 1e6) / 1e6;
 export function serializeTable(state) {
   return {
     pieces: state.pieces.map((p) => ({ ...p, pos: { x: q6(p.pos.x), y: q6(p.pos.y) } })),
-    frame: state.frame,
+    frame: structuredClone(state.frame), // clone, so a later takeShot mutating the live frame can't corrupt a captured snapshot
   };
 }
 

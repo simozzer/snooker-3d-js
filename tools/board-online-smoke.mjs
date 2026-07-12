@@ -149,7 +149,6 @@ test('host creates a room, guest joins, and moves sync both ways through the rea
 
   // The local-only lifecycle controls are hidden during an online game.
   assert.equal(await evaluate(`document.getElementById('newgame').style.display`), 'none');
-  assert.equal(await evaluate(`document.getElementById('sharelink').style.display`), 'none');
   assert.deepEqual(jsErrors, [], `unexpected JS errors: ${jsErrors.join(' | ')}`);
 
   guest.close();

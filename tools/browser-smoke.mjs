@@ -1,7 +1,7 @@
 // tools/browser-smoke.mjs — opt-in end-to-end smoke tests for the RENDERER (which the headless unit
 // suite can't reach). Boots serve.js + headless Chrome, drives the app over the DevTools Protocol, and
 // asserts the big user-facing flows: the app renders, modes switch, a shot resolves, Trick Shots loads
-// and solves, and a shared frame round-trips through a link. Run it with:
+// and solves, and an incoming ?frame= link opens a shared position. Run it with:
 //
 //   npm run test:browser
 //
@@ -16,6 +16,7 @@ import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { encodeFrame, variantById } from '../src/share.js';
 
 const HTTP_PORT = 47800 + (process.pid % 900);
 const CDP_PORT = 48800 + (process.pid % 900);
@@ -155,22 +156,17 @@ test('AI-vs-AI shows broadcast labels (AI 1 / AI 2)', async (t) => {
   await setSelect('aimode', 'ai');
 });
 
-test('a shared frame round-trips: play → copy link → open ?frame= replays it', async (t) => {
+// The "Copy share link" button was retired, but incoming ?frame= links still open and load the shared
+// position — mint a token straight from the codec and confirm the app opens it.
+test('an incoming ?frame= link opens and loads the shared position', async (t) => {
   if (guard(t)) return;
-  await setSelect('game', 'pool');
-  await sleep(400);
-  await click('play');
-  await waitFor(`document.getElementById('status').textContent.length>0`, { timeout: 6000 });
-  await sleep(1200);
-  await click('sharelink');
-  await sleep(400);
-  const url = await evaluate(`navigator.clipboard.readText().catch(()=>'')`);
-  assert.match(url, /[?&](challenge|frame)=[A-Za-z0-9_-]+/, 'no share link on the clipboard');
-  const token = url.replace(/.*[?&](?:challenge|frame)=/, '').split('&')[0];
+  const vId = 0;
+  const expectVariant = variantById(vId).id;
+  const token = encodeFrame({ variantId: vId, seed: 12345, shots: [] }); // a shared position, no shots
   await cdp('Page.navigate', { url: `${BASE}?frame=${token}` });
   assert.ok(await waitFor(`!!document.querySelector('#view canvas')`, { timeout: 15000 }), 'app did not re-render after navigation');
-  assert.ok(await waitFor(`/watching|shared frame|complete/i.test(document.getElementById('status').textContent)`, { timeout: 8000 }), 'shared frame did not load');
-  assert.equal(await evaluate(`document.getElementById('game').value`), 'pool');
+  assert.ok(await waitFor(`/shared (frame|position)|watching|take over/i.test(document.getElementById('status').textContent)`, { timeout: 8000 }), 'shared frame did not load');
+  assert.equal(await evaluate(`document.getElementById('game').value`), expectVariant);
 });
 
 test('no uncaught JavaScript errors during the whole session', async (t) => {

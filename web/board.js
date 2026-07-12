@@ -127,27 +127,8 @@ if (!entry) {
 
       el('newgame').addEventListener('click', () => controller.newGame());
 
-      // Share the current position as ?game=<id>&state=<token>. Hidden if the game has no codec.
-      const shareBtn = el('sharelink');
-      if (typeof controller.getShareToken !== 'function') {
-        shareBtn.style.display = 'none';
-      } else {
-        shareBtn.addEventListener('click', async () => {
-          const token = controller.getShareToken();
-          if (!token) { ui.status('Nothing to share yet.'); return; }
-          const url = `${location.origin}${location.pathname}?game=${gameId}&state=${encodeURIComponent(token)}`;
-          try {
-            await navigator.clipboard.writeText(url);
-            ui.status('Share link copied to clipboard.');
-          } catch {
-            // clipboard blocked (no gesture / permissions) — fall back to a prompt so it's still shareable
-            ui.status('Copy this link: ' + url);
-            try { window.prompt('Share link', url); } catch { /* headless */ }
-          }
-        });
-      }
-
-      // Resume a shared position if one is in the URL; otherwise start a fresh game.
+      // Resume a shared position if one is in the URL; otherwise start a fresh game. (The "Copy share
+      // link" button was retired, but any ?state= links already sent still open here.)
       const stateToken = params.get('state');
       let resumed = false;
       if (stateToken && typeof controller.loadShare === 'function') {
@@ -210,11 +191,9 @@ if (!entry) {
 
       // Online lifecycle is shared, so hide the local-only controls. (Hiding, not disabling: the
       // view's game-over banner re-enables New game via ui.result, which would fight a disabled flag.)
-      const shareDefaultDisplay = el('sharelink').style.display;
       function gateOnlineButtons() {
         const on = netState.active;
         el('newgame').style.display = on ? 'none' : '';
-        el('sharelink').style.display = on ? 'none' : shareDefaultDisplay;
         if (!on) el('rematch').style.display = 'none';
       }
 

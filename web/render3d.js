@@ -1005,7 +1005,7 @@ function updateTurnPrompt() {
 function syncTurnUI() {
   if (trick) return;
   const aiOnStrike = !!game && (!!aiLineup || !!aiPlace || (playing ? shotIsAi : isAiTurn()));
-  for (const id of ['row-trajectory', 'newframe', 'sharelink']) { const e = el(id); if (e) e.style.display = aiOnStrike ? 'none' : ''; }
+  for (const id of ['row-trajectory', 'newframe']) { const e = el(id); if (e) e.style.display = aiOnStrike ? 'none' : ''; }
 }
 
 function newFrameGame() {
@@ -1613,27 +1613,13 @@ el('trick-show').addEventListener('click', showTrickSolution);
 // --- shareable frames: watch, take over (correspondence), challenge, verified personal best ----
 // Because the engine is deterministic, the current frame = (variant, rack seed, executed shots). Encode
 // that into a ?frame= link (src/share.js); opening it re-simulates and plays the exact frame back. From
-// there you can Take over & reply (append your shots) — turn-based async play — or a ?challenge= link
-// racks the SAME layout and dares you to beat the sharer's break. Personal bests are stored as tokens,
-// so they're independently verifiable (tools/verify.mjs).
-function shareUrl() {
-  return `${location.origin}${location.pathname}?frame=${encodeFrame({ variantId: shareVariantId(variant), seed: frameSeed, shots: frameShots })}`;
-}
-function copyToClipboard(url, msg) {
-  const done = () => { status.textContent = msg; };
-  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done).catch(() => window.prompt('Link:', url));
-  else window.prompt('Link:', url);
-}
-let replying = false; // after Take over, the share button emits a ?frame= reply (watch my continuation)
-el('sharelink').addEventListener('click', () => {
-  if (trick) { status.textContent = 'Sharing is for game frames, not Trick Shots.'; return; }
-  if (!frameShots.length) { status.textContent = 'Play a shot first, then share the frame.'; return; }
-  const url = shareUrl().replace('?frame=', replying ? '?frame=' : '?challenge=');
-  copyToClipboard(url, replying ? 'Reply link copied — send it back.' : `Challenge link copied — dare a friend to beat this (${frameShots.length} shot${frameShots.length === 1 ? '' : 's'}).`);
-});
+// Incoming shared links still open here: a ?frame= link loads and replays a shared frame (then Take
+// over to play on from that position), and a ?challenge= link racks the SAME layout and dares you to
+// beat the sharer's break. Outgoing "copy link" generation was retired (a cleaner way to bring players
+// in is coming); personal bests are still stored as verifiable tokens (tools/verify.mjs).
 
 // Reset the shared/challenge context (called when starting a fresh frame, variant, or trick mode).
-function clearShareContext() { sharedReplay = null; sharedFrame = null; challenge = null; replying = false; el('takeover').style.display = 'none'; el('sharelink').textContent = '🔗 Copy share link'; }
+function clearShareContext() { sharedReplay = null; sharedFrame = null; challenge = null; el('takeover').style.display = 'none'; }
 
 // Load a shared frame: rack with its seed, then play its recorded shots back in order (watched, not
 // re-decided by rules/AI). Reuses the shot-cam + broadcast HUD so it looks like a live frame.
@@ -1672,15 +1658,13 @@ function loadFrameRack(decoded) {
   updateScore();
 }
 
-// Take over a watched frame from the current position and play on — your continued shots append to the
-// recorded ones, so "Copy reply link" is a fresh token you send back. Turn-based correspondence play.
+// Take over a watched frame from the current position and play on locally from where the sharer left off.
 el('takeover').addEventListener('click', () => {
   if (!sharedFrame) return;
   if (sharedReplay && playing) { status.textContent = 'Wait for the shot to finish, then take over.'; return; }
-  sharedReplay = null; sharedFrame = null; replying = true;
+  sharedReplay = null; sharedFrame = null;
   el('takeover').style.display = 'none';
-  el('sharelink').textContent = '↩ Copy reply link';
-  status.textContent = 'Your turn — play on, then “Copy reply link” to send it back.';
+  status.textContent = 'Your turn — play on from this position.';
   if (game.frame.ballInHand) beginBallInHand(); else endBallInHand();
   maybeAiTurn();
   if (!isAiTurn()) { resetHumanControls(); setSuggestedAim(); }
@@ -1975,7 +1959,7 @@ function armTrickAuto(index) {
 
 function setTrickUI(on) {
   el('trickpanel').style.display = on ? 'block' : 'none';
-  for (const id of ['newframe', 'sharelink', 'scores', 'breakline', 'pbline']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
+  for (const id of ['newframe', 'scores', 'breakline', 'pbline']) { const e = el(id); if (e) e.style.display = on ? 'none' : ''; }
   const rt = el('row-trajectory'); if (rt) rt.style.display = ''; // trajectories stay available while aiming a trick
   // Trick Shots runs as a hands-off "Watch AI vs AI" demonstration → show but LOCK the opponent to it
   // (difficulty is locked to Deadly by syncDifficultyUI when self-play is active).

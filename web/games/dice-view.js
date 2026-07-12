@@ -71,6 +71,13 @@ export default function mount(ctx) {
   let over = false;
   let busy = false;               // animation / AI acting — blocks human input
   let playback = null;            // active roll trajectory being played back
+  let aiMsg = null;               // a transient line shown while the AI deliberates (bank vs roll on)
+
+  // Deliberate AI pacing so its bank-or-risk decision is readable — it "considers the Bank button",
+  // then pauses BEFORE rolling again (or holds a beat as it banks) rather than snapping through its turn.
+  const AI_ROLLON_MS = 1050;      // it COULD bank but chooses to risk another roll — a real gamble, held longest
+  const AI_BUILD_MS = 650;        // below the 350 minimum, so it has no choice but to roll on — a shorter beat
+  const AI_BANK_MS = 1050;        // hold on the bank so the human sees the computer "press" Bank
   let raf = 0;
 
   // ---- three.js scene ------------------------------------------------------------------------
@@ -171,6 +178,7 @@ export default function mount(ctx) {
     }).join('');
     let line;
     if (s.phase === 'over') line = winMsg(s.players[s.winner].name);
+    else if (aiMsg) line = aiMsg; // the computer's bank-or-roll deliberation (shown during its pause)
     else if (busy && mode === 'ai' && s.current === 1) line = `Computer (${AI_STYLE[difficulty].split(' — ')[0]}) rolling…`;
     else if (s.farkled) line = 'Farkle! No score — turn lost.';
     else if (s.phase === 'await-roll') line = `First to ${TARGET} · roll to start your turn`;
@@ -424,8 +432,34 @@ export default function mount(ctx) {
     }, difficulty);
 
     busy = true; syncButtons();
-    if (action === 'roll') setTimeout(aiRoll, 500);
-    else { const won = engine.bank().won; if (won) finishGame(); else afterTurnChange(); }
+    const canBankNow = projected >= MIN_BANK; // is the Bank button one the computer could actually press?
+    if (action === 'roll') {
+      // Pause BEFORE rolling again so the choice reads. If it could have banked, show that it considered
+      // the Bank button and chose to gamble; otherwise it's simply still building toward the minimum.
+      if (canBankNow) { flashBank('consider', projected); aiMsg = `Computer could bank ${projected} — rolling on…`; }
+      else aiMsg = `Computer building a break… ${projected}`;
+      renderHud();
+      setTimeout(() => { flashBank(null); aiMsg = null; aiRoll(); }, canBankNow ? AI_ROLLON_MS : AI_BUILD_MS);
+    } else {
+      // Banking: hold a beat with the Bank button lit so the human sees the computer take its points.
+      flashBank('press', projected); aiMsg = `💰 Computer banks ${projected}`;
+      renderHud();
+      setTimeout(() => {
+        flashBank(null); aiMsg = null;
+        const won = engine.bank().won;
+        if (won) finishGame(); else afterTurnChange();
+      }, AI_BANK_MS);
+    }
+  }
+
+  // Momentarily style the Bank button to show the computer's thinking: 'press' = it's banking now
+  // (lit green), 'consider' = it could bank this many but is rolling on (outlined), null = clear.
+  function flashBank(state, value) {
+    if (state === null) { bankBtn.style.background = ''; bankBtn.style.opacity = ''; bankBtn.style.boxShadow = ''; return; }
+    bankBtn.textContent = `💰 Bank ${value}`;
+    bankBtn.style.opacity = '1';
+    bankBtn.style.background = state === 'press' ? '#2e8b57' : '#33404c';
+    bankBtn.style.boxShadow = state === 'press' ? '0 0 0 3px rgba(127,201,127,.7)' : '0 0 0 2px rgba(127,201,127,.35)';
   }
 
   function selectAllScoring() {
@@ -486,7 +520,7 @@ export default function mount(ctx) {
   // ---- controller ---------------------------------------------------------------------------
   const controller = {
     newGame() {
-      over = false; busy = false; playback = null;
+      over = false; busy = false; playback = null; aiMsg = null; flashBank(null);
       mode = ctx.getMode(); difficulty = ctx.getDifficulty();
       const names = mode === 'ai' ? ['You', 'Computer'] : ['Player 1', 'Player 2'];
       engine.newGame(names);

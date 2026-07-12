@@ -180,7 +180,7 @@ export default function mount(ctx) {
     if (s.phase === 'over') line = winMsg(s.players[s.winner].name);
     else if (aiMsg) line = aiMsg; // the computer's bank-or-roll deliberation (shown during its pause)
     else if (busy && mode === 'ai' && s.current === 1) line = `Computer (${AI_STYLE[difficulty].split(' — ')[0]}) rolling…`;
-    else if (s.farkled) line = 'Farkle! No score — turn lost.';
+    else if (s.farkled) line = 'Bust! No score — turn lost.';
     else if (s.phase === 'await-roll') line = s.finalRound
       ? `🏁 Final turn — beat ${beatOf(s)} to win · roll`
       : `First to ${TARGET} · roll to start your turn`;
@@ -608,7 +608,7 @@ export default function mount(ctx) {
       renderer.dispose();
     },
     rulesHtml: `
-      <p style="margin:0 0 6px;color:#8fa3b5">A push-your-luck dice game — the “Dice” house rules (Farkle-style).</p>
+      <p style="margin:0 0 6px;color:#8fa3b5">A push-your-luck dice game — the “Dice” house rules.</p>
       <h4>Goal</h4>
       <ul>
         <li>Reach <b>${TARGET}</b> points to trigger the <b>final round</b>.</li>
@@ -620,7 +620,7 @@ export default function mount(ctx) {
         <li><b>Roll on</b> with the dice that are left to build your turn total — or <b>Bank</b> to keep it.</li>
         <li>You need <b>${MIN_BANK}+</b> in a turn before you're allowed to bank.</li>
         <li>Set all six aside and you earn <b>hot dice</b> — throw a fresh six and keep going.</li>
-        <li>Roll and score <b>nothing</b> and you <b>farkle</b>: the whole turn's points are lost.</li>
+        <li>Roll and score <b>nothing</b> and you <b>bust</b>: the whole turn's points are lost.</li>
       </ul>
       <h4>Scoring</h4>
       <ul>
@@ -629,7 +629,7 @@ export default function mount(ctx) {
         <li>Each extra die of that face doubles the triple (4-of ×2, 5-of ×4, 6-of ×8).</li>
       </ul>
       <h4>Strikes</h4>
-      <ul><li>Three farkles in a row costs you 1000 points.</li></ul>
+      <ul><li>Three busts in a row costs you 1000 points.</li></ul>
       <h4>Computer players</h4>
       <ul>
         <li><b>Easy</b> — ${AI_STYLE.easy}.</li>

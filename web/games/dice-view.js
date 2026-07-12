@@ -174,8 +174,12 @@ export default function mount(ctx) {
     else if (busy && mode === 'ai' && s.current === 1) line = `Computer (${AI_STYLE[difficulty].split(' — ')[0]}) rolling…`;
     else if (s.farkled) line = 'Farkle! No score — turn lost.';
     else if (s.phase === 'await-roll') line = `First to ${TARGET} · roll to start your turn`;
-    else line = sel > 0 ? `Selected ${sel} · turn ${s.turnScore + sel}`
-      : `Turn ${s.turnScore} — tap the glowing dice to keep them`;
+    else if (sel > 0) {
+      const bankable = s.turnScore + sel;
+      line = engine.canBank()
+        ? `Selected ${sel} · turn ${bankable} · 💰 Bank to keep ${bankable}`
+        : `Selected ${sel} · turn ${bankable} · ${s.minBank - bankable} more to bank`;
+    } else line = `Turn ${s.turnScore} — tap the glowing dice to keep them`;
     promptEl.textContent = line;
   }
 
@@ -457,6 +461,16 @@ export default function mount(ctx) {
       || (s.phase === 'pick' && !engine.canRoll());
     bankBtn.disabled = lock || !engine.canBank();
     rollBtn.textContent = s.phase === 'await-roll' ? '🎲 Roll' : '🎲 Roll on';
+    // Show what the bank is worth: banking commits the current selection, so it's worth the points
+    // already set aside this turn PLUS whatever is selected right now. Below the minimum, show how
+    // close you are so the "get on the board" threshold isn't a mystery.
+    const bankable = s.turnScore + engine.selectionScore();
+    if (engine.canBank()) bankBtn.textContent = `💰 Bank ${bankable}`;
+    else if (bankable > 0 && bankable < s.minBank) bankBtn.textContent = `💰 Bank ${bankable}/${s.minBank}`;
+    else bankBtn.textContent = '💰 Bank';
+    bankBtn.title = engine.canBank()
+      ? `Bank ${bankable} and end your turn`
+      : `Reach ${s.minBank} in a turn to bank (you have ${bankable})`;
   }
 
   // ---- main loop ----------------------------------------------------------------------------

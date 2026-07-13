@@ -41,6 +41,13 @@ export class Stats {
   // Plain object for persistence (sub → record).
   snapshot() { return Object.fromEntries(this._m); }
 
+  // Every player we know of (sub + name + totals). Used as the Community roster fallback when the
+  // Keycloak account roster isn't configured — i.e. "everyone who's played" instead of "everyone who
+  // registered". Includes the sub for correlation with live presence.
+  roster() {
+    return [...this._m.entries()].map(([sub, r]) => ({ sub, name: r.name ?? 'player', games: r.games, wins: r.wins }));
+  }
+
   // Leaderboard: top N by wins, then games as a tiebreak. Only players with ≥1 game.
   top(n = 10) {
     return [...this._m.values()]

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { Rooms } from './rooms.js';
 import { verifierFromEnv } from './auth.js';
 import { Stats } from './stats.js';
+import { rosterFromEnv } from './roster.js';
 
 const PORT = Number(process.argv[2] ?? process.env.PORT ?? 8090);
 const HEARTBEAT_MS = 30_000;   // ping every 30s; a socket that misses a pong is dead
@@ -46,6 +47,11 @@ const stats = new Stats({ initial: loadStats(), persist: persistStats });
 const verifier = verifierFromEnv();
 const REQUIRE_AUTH = process.env.REQUIRE_AUTH === '1' || process.env.REQUIRE_AUTH === 'true';
 if (verifier.enabled) console.log(`auth: verifying tokens from ${process.env.OIDC_ISSUER}${REQUIRE_AUTH ? ' (required)' : ' (optional)'}`);
+
+// Optional registered-user roster from Keycloak (see roster.js). Disabled unless KC_ROSTER_* is set,
+// so dev/tests/CDN stay secret-free; when on, the Community page can list everyone who has an account.
+const roster = rosterFromEnv();
+if (roster.enabled) { console.log(`roster: Keycloak membership from ${process.env.KC_ROSTER_BASE} realm ${process.env.KC_ROSTER_REALM}`); roster.warm(); }
 
 const rooms = new Rooms({
   maxRooms: Number(process.env.MAX_ROOMS ?? 5000),
@@ -208,6 +214,37 @@ wss.on('connection', (ws, req) => {
         send(ws, { type: 'online', count: wss.clients.size, signedIn: users.length, users });
         break;
       }
+      case 'members': {
+        // Public: the whole REGISTERED membership by first name (from Keycloak, via roster.js),
+        // annotated with who's online right now and each player's win/played totals. When the Keycloak
+        // roster isn't configured it degrades to the stats roster (everyone who's played), so the page
+        // still shows people. No identity (sub/email) is ever put on the wire — first names only.
+        const playing = rooms.playingMap();
+        const onlineBySub = new Map();   // sub → the game they're mid-play in (or null)
+        const nameBySub = new Map();     // sub → a live display name (for online users not yet in cache)
+        for (const set of presence.values()) {
+          for (const w of set) {
+            const s = w.identity?.sub; if (!s) continue;
+            if (w.identity.name) nameBySub.set(s, w.identity.name);
+            const g = playing.get(w.pid) ?? null;
+            if (!onlineBySub.has(s) || g) onlineBySub.set(s, g);
+          }
+        }
+        // Build the member set keyed by sub: registered accounts first, then the played-stats roster as
+        // a fallback, then any signed-in-online player not yet reflected in either (fresh registration).
+        const bySub = new Map();
+        for (const u of await roster.list()) bySub.set(u.sub, u.name);
+        if (!roster.enabled) for (const r of stats.roster()) if (!bySub.has(r.sub)) bySub.set(r.sub, r.name);
+        for (const [s, nm] of nameBySub) if (!bySub.has(s)) bySub.set(s, nm);
+        const members = [...bySub.entries()].map(([sub, name]) => {
+          const st = stats.get(sub);
+          return { name, online: onlineBySub.has(sub), playing: onlineBySub.get(sub) ?? null, games: st.games, wins: st.wins };
+        });
+        // Online first, then most-active, then alphabetical.
+        members.sort((a, b) => (Number(b.online) - Number(a.online)) || (b.games - a.games) || a.name.localeCompare(b.name));
+        send(ws, { type: 'members', count: wss.clients.size, registered: members.length, online: onlineBySub.size, members });
+        break;
+      }
       case 'invite': {
         // A signed-in host rings a friend by name to join THEIR room. Requires a verified identity (so
         // the invite carries a real "from"), and that the host actually holds a seat in that room.
@@ -260,7 +297,10 @@ const sweeper = setInterval(() => {
 
 wss.on('close', () => { clearInterval(heartbeat); clearInterval(sweeper); });
 
-console.log(`relay listening on ws://${HOST}:${PORT}`);
+// Announce only once the socket is truly accepting connections — the underlying server.listen() is
+// async, so logging synchronously after construction would race clients (and test harnesses) that
+// connect on seeing the banner.
+wss.on('listening', () => console.log(`relay listening on ws://${HOST}:${PORT}`));
 
 // Clean, PROMPT shutdown (systemd/k8s SIGTERM, Ctrl+C). Terminate live sockets so wss.close resolves
 // immediately instead of waiting for idle clients to drop, with a hard-stop fallback.

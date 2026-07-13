@@ -47,10 +47,14 @@
       ul.people li { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #232c35; font-size: 13.5px; }
       ul.people li:last-child { border-bottom: none; }
       ul.people li.me .nm { color: #ffdf6b; font-weight: 700; }
+      ul.people li.offline { opacity: .58; }
+      ul.people li.offline .nm { color: #9fb0bf; }
       .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #54c98a; flex: none; box-shadow: 0 0 0 0 rgba(84,201,138,.6); animation: pulse 2s infinite; }
+      .off-dot { width: 8px; height: 8px; border-radius: 50%; background: #46525e; flex: none; }
       @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(84,201,138,.5);} 70% { box-shadow: 0 0 0 6px rgba(84,201,138,0);} 100% { box-shadow: 0 0 0 0 rgba(84,201,138,0);} }
       .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .badge { font-size: 10.5px; letter-spacing: .3px; color: #cfe0ee; background: #2a333d; border-radius: 999px; padding: 2px 8px; flex: none; }
+      .stat { font-size: 10.5px; color: #7f93a5; font-variant-numeric: tabular-nums; flex: none; }
       .empty { color: #6f8496; font-size: 12.5px; padding: 6px 2px; line-height: 1.5; }
 
       /* score tables */
@@ -114,7 +118,7 @@
     <div class="bg" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
     <header>
       <h1>Community <span class="dot">·</span> who's here</h1>
-      <p class="tag">Who's online across the compendium right now, and the score tables for every game.</p>
+      <p class="tag">Everyone who's signed up — who's online right now — and the score tables for every game.</p>
     </header>
     <section id="join">
       <span class="ic">👋</span>
@@ -129,8 +133,8 @@
     </section>
     <main>
       <section class="card" id="online-card">
-        <h2>Online now <button class="refresh" id="online-refresh" title="Refresh">⟳</button></h2>
-        <div class="online-count"><span class="n" id="online-n">–</span><span class="lbl">connected</span></div>
+        <h2>Players <button class="refresh" id="online-refresh" title="Refresh">⟳</button></h2>
+        <div class="online-count"><span class="n" id="online-n">–</span><span class="lbl">online</span></div>
         <div class="online-sub" id="online-sub"></div>
         <ul class="people" id="people"></ul>
       </section>

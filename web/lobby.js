@@ -66,7 +66,7 @@ let activeTab = 'overall';
 relay.on('reconnecting', () => setNetStat('connecting', 'Connecting…'));
 relay.on('neterror', () => setNetStat('offline', 'Multiplayer offline'));
 relay.on('close', () => setNetStat('offline', 'Multiplayer offline'));
-relay.on('online', renderOnline);
+relay.on('members', renderMembers);
 relay.on('scores', (m) => { scores = m; renderTabs(); renderScores(); });
 
 async function boot() {
@@ -88,32 +88,40 @@ async function boot() {
   }
 }
 
-function refreshAll() { relay.requestOnline(); relay.requestScores(); }
-// Online presence changes fast, so poll it briskly; scores change only when a game ends, so slower.
-const onlineTimer = setInterval(() => relay.requestOnline(), 4000);
+function refreshAll() { relay.requestMembers(); relay.requestScores(); }
+// Presence (who's online) changes fast, so poll the membership briskly; scores change only when a
+// game ends, so slower.
+const onlineTimer = setInterval(() => relay.requestMembers(), 4000);
 const scoresTimer = setInterval(() => relay.requestScores(), 20000);
 window.addEventListener('beforeunload', () => { clearInterval(onlineTimer); clearInterval(scoresTimer); });
-el('online-refresh').addEventListener('click', () => relay.requestOnline());
+el('online-refresh').addEventListener('click', () => relay.requestMembers());
 el('scores-refresh').addEventListener('click', () => relay.requestScores());
 
-// --- render: online -----------------------------------------------------------------------------
-function renderOnline(m) {
-  el('online-n').textContent = m.count ?? 0;
-  const signed = m.signedIn ?? (m.users?.length || 0);
-  const anon = Math.max(0, (m.count ?? 0) - signed);
-  el('online-sub').textContent = signed
-    ? `${signed} signed in${anon ? ` · ${anon} playing anonymously` : ''}`
-    : `${m.count ?? 0} here — nobody signed in`;
+// --- render: registered members -----------------------------------------------------------------
+// Shows EVERYONE who has an account (first names), not just who's online. Online players float to the
+// top with a live dot and a "what they're playing" badge; offline members sit below, dimmed, with
+// their win/played tally. Anonymous visitors are counted but stay unnamed.
+function renderMembers(m) {
+  const members = m.members ?? [];
+  const online = m.online ?? members.filter((u) => u.online).length;
+  const total = m.registered ?? members.length;
+  const anon = Math.max(0, (m.count ?? 0) - online);
+  el('online-n').textContent = online;
+  el('online-sub').textContent = total
+    ? `${total} registered · ${online} online${anon ? ` · ${anon} anon` : ''}`
+    : `${m.count ?? 0} here — no registered players yet`;
   const people = el('people');
-  const users = m.users ?? [];
-  if (!users.length) {
-    people.innerHTML = `<li class="empty">No signed-in players online. Sign in on any game page to show up here — anonymous players are counted above but stay unnamed.</li>`;
+  if (!members.length) {
+    people.innerHTML = `<li class="empty">No registered players yet. Create an account on any game page and your first name shows up here.</li>`;
     return;
   }
-  people.innerHTML = users.map((u) => {
+  people.innerHTML = members.map((u) => {
     const isMe = myName && u.name.toLowerCase() === myName.toLowerCase();
-    const badge = u.playing ? `<span class="badge">${meta(u.playing).icon} ${esc(meta(u.playing).label)}</span>` : '';
-    return `<li class="${isMe ? 'me' : ''}"><span class="live-dot"></span><span class="nm">${esc(u.name)}</span>${badge}</li>`;
+    const dot = u.online ? `<span class="live-dot"></span>` : `<span class="off-dot"></span>`;
+    const badge = u.online && u.playing
+      ? `<span class="badge">${meta(u.playing).icon} ${esc(meta(u.playing).label)}</span>`
+      : (u.games ? `<span class="stat">${u.wins}/${u.games}</span>` : '');
+    return `<li class="${isMe ? 'me' : ''}${u.online ? '' : ' offline'}">${dot}<span class="nm">${esc(u.name)}</span>${badge}</li>`;
   }).join('');
 }
 

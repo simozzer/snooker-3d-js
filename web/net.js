@@ -137,6 +137,9 @@ export class RelayClient {
   // fire-and-forget; replies arrive as 'scores' and 'online' events. Safe to poll.
   requestScores() { this._raw({ type: 'scores' }); }
   requestOnline() { this._raw({ type: 'online' }); }
+  // Community page: the full registered membership (first names) with each player's online state and
+  // totals. Reply arrives as a 'members' event; fire-and-forget, safe to poll.
+  requestMembers() { this._raw({ type: 'members' }); }
   // Report a finished game so the relay tallies stats. `winner` is the winning seat, or null for a draw.
   sendGameOver(winner) { this._raw({ type: 'game-over', code: this.code, winner }); }
   // Ask the relay to start a fresh game in the same room; it broadcasts a 'rematch' with the new seed.

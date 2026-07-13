@@ -39,16 +39,42 @@ function defaultRandomU32() {
 }
 
 export class Rooms {
-  constructor({ randomU32 = defaultRandomU32, genCode = null, now = () => Date.now(), roomTtlMs = 30 * 60 * 1000 } = {}) {
+  constructor({ randomU32 = defaultRandomU32, genCode = null, now = () => Date.now(), roomTtlMs = 30 * 60 * 1000,
+    // Abuse backstops (well above anything real play produces; env-tunable via relay.js). They bound
+    // memory so no single client can grow the server without limit — they never fire in a real game.
+    maxRooms = 5000,           // total live rooms across the server
+    maxRoomsPerPid = 20,       // rooms one player may hold open at once
+    maxLog = 4000,             // move+random entries per room (a marathon game is a few hundred)
+    maxPayloadBytes = 16384,   // per-move payload size (cue table snapshots are ~4 KB; boards are tiny)
+  } = {}) {
     this.rooms = new Map(); // code → room
     this._randomU32 = randomU32;
     this._now = now;
     this.roomTtlMs = roomTtlMs;
+    this.maxRooms = maxRooms;
+    this.maxRoomsPerPid = maxRoomsPerPid;
+    this.maxLog = maxLog;
+    this.maxPayloadBytes = maxPayloadBytes;
     this._genCode = genCode ?? (() => {
       let s = '';
       for (let i = 0; i < CODE_LEN; i++) s += CODE_ALPHABET[this._randomU32() % CODE_ALPHABET.length];
       return s;
     });
+  }
+
+  // --- abuse guards / input hygiene ----------------------------------------------------------
+  // Trim a display name to something safe to store and broadcast: no control chars, capped length.
+  // (Rendering still HTML-escapes; this bounds storage and stops absurd names on the wire.)
+  _cleanName(name) {
+    if (name == null) return null;
+    const s = String(name).replace(/[\u0000-\u001F\u007F]/g, '').trim().slice(0, 40);
+    return s || null;
+  }
+  _roomsCreatedBy(pid) { let n = 0; for (const r of this.rooms.values()) if (r.createdBy === pid) n++; return n; }
+  _payloadTooBig(payload) {
+    if (payload == null) return false;
+    let s; try { s = JSON.stringify(payload); } catch { return true; } // circular/unserialisable → reject
+    return s.length > this.maxPayloadBytes;
   }
 
   // --- lookups -------------------------------------------------------------------------------
@@ -103,7 +129,10 @@ export class Rooms {
   // the same deterministic RNG.
   create({ pid, game, seats = 2, name = null }) {
     if (!pid) return { error: 'no-pid' };
+    game = String(game || '').replace(/[^\w-]/g, '').slice(0, 24); // whitelist the game token
     if (!game) return { error: 'no-game' };
+    if (this.rooms.size >= this.maxRooms) return { error: 'server-busy' };
+    if (this._roomsCreatedBy(pid) >= this.maxRoomsPerPid) return { error: 'too-many-rooms' };
     seats = Math.max(2, Math.min(8, seats | 0));
 
     // Find a free code (collisions are astronomically unlikely, but loop defensively).
@@ -113,12 +142,13 @@ export class Rooms {
 
     const room = {
       code, game, seats,
+      createdBy: pid,   // so we can cap how many rooms one player holds open
       seed: this._randomU32(),
       turn: 0,          // seat 0 (the creator) moves first
       seq: 0,           // monotonic log sequence number
       counted: false,   // has a completed game here already been tallied into stats?
       log: [],          // ordered [{ seq, seat, kind:'move'|'random', payload?/value? }]
-      players: new Map([[pid, { pid, seat: 0, name, connected: true }]]),
+      players: new Map([[pid, { pid, seat: 0, name: this._cleanName(name), connected: true }]]),
       createdAt: this._now(),
       lastActivity: this._now(),
     };
@@ -145,7 +175,7 @@ export class Rooms {
     for (let s = 0; s < room.seats; s++) if (!taken.has(s)) { seat = s; break; }
     if (seat === -1) return { error: 'full' };
 
-    room.players.set(pid, { pid, seat, name, connected: true });
+    room.players.set(pid, { pid, seat, name: this._cleanName(name), connected: true });
     this._touch(room);
     return {
       code,
@@ -188,6 +218,8 @@ export class Rooms {
     const me = room.players.get(pid);
     if (!me) return { error: 'not-in-room' };
     if (me.seat !== room.turn) return { error: 'not-your-turn' };
+    if (room.log.length >= this.maxLog) return { error: 'log-full' };       // backstop: no unbounded log growth
+    if (this._payloadTooBig(payload)) return { error: 'payload-too-big' };  // backstop: bound per-move size
 
     let nextTurn = next;
     if (nextTurn == null) nextTurn = (me.seat + 1) % room.seats;
@@ -209,6 +241,7 @@ export class Rooms {
     const me = room.players.get(pid);
     if (!me) return { error: 'not-in-room' };
     if (me.seat !== room.turn) return { error: 'not-your-turn' };
+    if (room.log.length >= this.maxLog) return { error: 'log-full' };
 
     const value = this._randomU32();
     const entry = { seq: ++room.seq, seat: me.seat, kind: 'random', value };

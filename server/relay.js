@@ -22,6 +22,15 @@ const HEARTBEAT_MS = 30_000;   // ping every 30s; a socket that misses a pong is
 const SWEEP_MS = 60_000;       // reap idle rooms once a minute
 const MIN_MOVES = 2;           // a game must have at least this many moves before it counts in stats
 
+// Abuse resistance for public exposure (all env-tunable; defaults are generous vs real play). See the
+// per-room caps in rooms.js too. None of these fire during a normal game.
+const HOST = process.env.HOST || '127.0.0.1';                    // bind loopback; reach via the proxy
+const MAX_FRAME = Number(process.env.MAX_FRAME_BYTES ?? 65536);  // reject WS frames larger than 64 KB
+const MAX_CONNS = Number(process.env.MAX_CONNS ?? 2000);         // total concurrent sockets
+const MSG_RATE = Number(process.env.MSG_RATE ?? 30);            // sustained messages/sec per socket
+const MSG_BURST = Number(process.env.MSG_BURST ?? 60);          // token-bucket capacity (short bursts)
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+
 // Per-player stats (games/wins), persisted as JSON. Keyed by OIDC sub, so only logged-in players count.
 const DATA_DIR = process.env.DATA_DIR || './data';
 const STATS_FILE = join(DATA_DIR, 'stats.json');
@@ -38,7 +47,12 @@ const verifier = verifierFromEnv();
 const REQUIRE_AUTH = process.env.REQUIRE_AUTH === '1' || process.env.REQUIRE_AUTH === 'true';
 if (verifier.enabled) console.log(`auth: verifying tokens from ${process.env.OIDC_ISSUER}${REQUIRE_AUTH ? ' (required)' : ' (optional)'}`);
 
-const rooms = new Rooms();
+const rooms = new Rooms({
+  maxRooms: Number(process.env.MAX_ROOMS ?? 5000),
+  maxRoomsPerPid: Number(process.env.MAX_ROOMS_PER_PID ?? 20),
+  maxLog: Number(process.env.MAX_LOG ?? 4000),
+  maxPayloadBytes: Number(process.env.MAX_PAYLOAD_BYTES ?? 16384),
+});
 const sockets = new Map(); // pid → ws
 
 // Presence: which authenticated players are online, so a signed-in host can invite a friend BY NAME.
@@ -69,12 +83,21 @@ function dispatch(ws, pid, result) {
   if (result.all) for (const m of members) toPid(m, result.all);
 }
 
-const wss = new WebSocketServer({ port: PORT });
+const wss = new WebSocketServer({ host: HOST, port: PORT, maxPayload: MAX_FRAME });
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  // Origin allowlist (opt-in). Empty ALLOWED_ORIGINS = allow all, so anonymous CDN play still works.
+  if (ALLOWED_ORIGINS.length && !ALLOWED_ORIGINS.includes(req.headers.origin || '')) {
+    try { ws.close(1008, 'origin'); } catch { /* already gone */ }
+    return;
+  }
+  // Connection cap — this socket is already counted in wss.clients, so compare with '>'.
+  if (wss.clients.size > MAX_CONNS) { try { ws.close(1013, 'busy'); } catch { /* gone */ } return; }
+
   const pid = randomUUID();
   ws.pid = pid;
   ws.isAlive = true;
+  ws._tokens = MSG_BURST; ws._lastRefill = Date.now(); // per-socket rate-limit bucket
   sockets.set(pid, ws);
   ws.on('pong', () => { ws.isAlive = true; });
 
@@ -90,6 +113,13 @@ wss.on('connection', (ws) => {
   const guard = () => { if (REQUIRE_AUTH && !ws.identity) { send(ws, { type: 'error', error: 'auth-required' }); return false; } return true; };
 
   ws.on('message', async (data) => {
+    // Per-socket token bucket: refill MSG_RATE/sec up to MSG_BURST; drop (don't process) when empty.
+    const nowMs = Date.now();
+    ws._tokens = Math.min(MSG_BURST, ws._tokens + ((nowMs - ws._lastRefill) / 1000) * MSG_RATE);
+    ws._lastRefill = nowMs;
+    if (ws._tokens < 1) return send(ws, { type: 'error', error: 'rate-limited' });
+    ws._tokens -= 1;
+
     let m;
     try { m = JSON.parse(data); } catch { return send(ws, { type: 'error', error: 'bad-json' }); }
     if (!m || typeof m.type !== 'string') return send(ws, { type: 'error', error: 'bad-msg' });
@@ -132,11 +162,18 @@ wss.on('connection', (ws) => {
         if (!guard()) break;
         dispatch(ws, pid, rooms.join({ pid, code: up(m.code), name: trustedName(m.name) }));
         break;
-      case 'resume':
-        // A reconnecting client re-registers its old pid on THIS socket, then resumes its seat.
-        if (m.pid && m.pid !== pid) { sockets.delete(pid); ws.pid = m.pid; sockets.set(m.pid, ws); }
+      case 'resume': {
+        // A reconnecting client re-registers its old pid on THIS socket, then resumes its seat. Refuse
+        // to adopt a pid still held by another LIVE socket (blocks active-session hijack; a genuine
+        // reconnect only happens after the old socket closed and was removed from `sockets`).
+        if (m.pid && m.pid !== pid) {
+          const holder = sockets.get(m.pid);
+          if (holder && holder !== ws && holder.readyState === holder.OPEN) { send(ws, { type: 'error', error: 'pid-in-use' }); break; }
+          sockets.delete(pid); ws.pid = m.pid; sockets.set(m.pid, ws);
+        }
         dispatch(ws, ws.pid, rooms.resume({ pid: ws.pid, code: up(m.code) }));
         break;
+      }
       case 'move':
         dispatch(ws, ws.pid, rooms.move({ pid: ws.pid, code: up(m.code), payload: m.payload, next: m.next }));
         break;
@@ -223,7 +260,7 @@ const sweeper = setInterval(() => {
 
 wss.on('close', () => { clearInterval(heartbeat); clearInterval(sweeper); });
 
-console.log(`relay listening on ws://0.0.0.0:${PORT}`);
+console.log(`relay listening on ws://${HOST}:${PORT}`);
 
 // Clean, PROMPT shutdown (systemd/k8s SIGTERM, Ctrl+C). Terminate live sockets so wss.close resolves
 // immediately instead of waiting for idle clients to drop, with a hard-stop fallback.

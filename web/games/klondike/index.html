@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Klondike Solitaire</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%83%8F</text></svg>" />
+  <style>
+    :root { color-scheme: dark; --cw: min(12.5vw, 76px); --ch: calc(var(--cw) * 1.4); --stack: calc(var(--cw) * 0.30); }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #0f2417; background-image: radial-gradient(circle at 50% 0%, #17462b, #0f2417 70%); color: #e8e8e8;
+      display: flex; flex-direction: column; align-items: center; }
+    a { color: #7fb0d8; }
+
+    #chrome { position: fixed; top: 8px; left: 10px; z-index: 50; display: flex; gap: 10px; align-items: center; font: 600 12px/1 system-ui, sans-serif; }
+    #chrome a { color: #cfe0ee; text-decoration: none; background: #1b2229; border: 1px solid #2a333d; border-radius: 8px; padding: 5px 10px; }
+    #chrome a:hover { border-color: #3f5568; }
+    #build { color: #8fb59c; }
+
+    header { text-align: center; margin: 50px 16px 6px; }
+    h1 { font-size: 23px; margin: 0; letter-spacing: .5px; }
+    h1 .accent { color: #ffd45b; }
+
+    .hud { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; margin: 10px 0 4px; }
+    .stat { background: rgba(0,0,0,.25); border: 1px solid #2f5a41; border-radius: 10px; padding: 7px 12px; font-size: 13px; color: #d7e7dc; }
+    .stat b { color: #fff; }
+    button { font: 600 13px system-ui, sans-serif; padding: 8px 13px; border: 0; border-radius: 9px; cursor: pointer; background: #2e7d5b; color: #fff; }
+    button.sec { background: #33404c; color: #cfe0ee; }
+    button.toggle { background: #24503a; color: #cfe7d6; border: 1px solid #397a57; }
+    button.toggle.active { background: #ffd45b; color: #23331b; }
+    button:disabled { opacity: .45; cursor: default; }
+    button:hover:not(:disabled) { filter: brightness(1.08); }
+
+    .table { margin: 14px auto 8px; padding: 0 10px; width: 100%; max-width: 720px; }
+    .row { display: grid; grid-template-columns: repeat(7, var(--cw)); gap: calc((100% - 7 * var(--cw)) / 6); justify-content: center; }
+    .top { margin-bottom: calc(var(--cw) * 0.34); }
+
+    .slot { width: var(--cw); height: var(--ch); border-radius: calc(var(--cw) * 0.12);
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,.10); position: relative; }
+    .slot.stock { cursor: pointer; }
+    .slot.empty-foundation { box-shadow: inset 0 0 0 2px rgba(255,255,255,.14); }
+    .slot.empty-foundation::after { content: attr(data-suit); position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: calc(var(--cw) * 0.5); color: rgba(255,255,255,.14); }
+
+    .pile { width: var(--cw); min-height: var(--ch); position: relative; }
+    .pile.droptarget { box-shadow: 0 0 0 2px #ffd45b; border-radius: calc(var(--cw) * 0.12); }
+    .pile.empty { height: var(--ch); box-shadow: inset 0 0 0 2px rgba(255,255,255,.10); border-radius: calc(var(--cw) * 0.12); cursor: pointer; }
+
+    .card { width: var(--cw); height: var(--ch); border-radius: calc(var(--cw) * 0.12); position: relative; user-select: none;
+      box-shadow: 0 1px 3px rgba(0,0,0,.5); cursor: pointer; }
+    .card.face { background: #fbfbf7; }
+    .card .corner { position: absolute; top: 4%; left: 7%; font: 700 calc(var(--cw) * 0.34) / 1 "Segoe UI", system-ui, sans-serif; }
+    .card .pip { position: absolute; bottom: 6%; right: 8%; font-size: calc(var(--cw) * 0.42); line-height: 1; }
+    .card.red { color: #d1344b; } .card.black { color: #1a1a1a; }
+    .card.down { background: repeating-linear-gradient(45deg, #23508f 0 6px, #1b3f73 6px 12px); box-shadow: inset 0 0 0 2px rgba(255,255,255,.18), 0 1px 3px rgba(0,0,0,.5); }
+    .card.sel { box-shadow: 0 0 0 3px #ffd45b, 0 2px 6px rgba(0,0,0,.6); }
+    .card.hint { box-shadow: 0 0 0 2px #54c98a, 0 1px 3px rgba(0,0,0,.5); }
+
+    /* tableau cards overlap vertically; absolute-positioned by JS via --i */
+    .pile .card { position: absolute; left: 0; top: calc(var(--stack) * var(--i)); }
+    /* waste fan (draw-3) */
+    .waste-fan { position: relative; width: calc(var(--cw) * 1.5); height: var(--ch); }
+    .waste-fan .card { position: absolute; top: 0; left: calc(var(--cw) * 0.25 * var(--j)); }
+
+    #msg { min-height: 22px; margin: 4px 0 8px; font-size: 15px; font-weight: 700; text-align: center; color: #ffd45b; }
+    footer { margin: 8px 0 30px; font-size: 12px; color: #7f9e8a; text-align: center; max-width: 520px; padding: 0 16px; }
+  </style>
+</head>
+<body>
+  <div id="chrome"><a href="../../../index.html">← All games</a><span id="build">Klondike</span></div>
+
+  <header><h1>Klondike <span class="accent">Solitaire</span></h1></header>
+
+  <div class="hud">
+    <button id="draw1" class="toggle active">Draw 1</button>
+    <button id="draw3" class="toggle">Draw 3</button>
+    <div class="stat">Moves <b id="moves">0</b></div>
+    <button id="collect" class="sec">Collect</button>
+    <button id="undo" class="sec" disabled>Undo</button>
+    <button id="newgame">New game</button>
+  </div>
+
+  <div class="table">
+    <div class="row top">
+      <div id="stock" class="slot stock"></div>
+      <div id="waste"></div>
+      <div></div>
+      <div class="foundation-slot" data-suit="♠"></div>
+      <div class="foundation-slot" data-suit="♥"></div>
+      <div class="foundation-slot" data-suit="♦"></div>
+      <div class="foundation-slot" data-suit="♣"></div>
+    </div>
+    <div id="tableau" class="row"></div>
+  </div>
+
+  <div id="msg"></div>
+  <footer>Click the stock to deal. Click a card to pick it up, then click where it goes (legal spots light up green). Double-click sends a card home to its foundation; <b>Collect</b> sweeps every card it can. Build the tableau down in alternating colours; build foundations up by suit from the Ace.</footer>
+
+  <script type="module" src="./klondike.js"></script>
+</body>
+</html>

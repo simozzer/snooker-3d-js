@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Peg Solitaire</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%94%98</text></svg>" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #12161b; color: #e8e8e8; display: flex; flex-direction: column; align-items: center; }
+    a { color: #7fb0d8; }
+
+    /* compendium chrome (matches the other game pages) */
+    #chrome { position: fixed; top: 8px; left: 10px; z-index: 50; display: flex; gap: 10px; align-items: center;
+      font: 600 12px/1 system-ui, sans-serif; }
+    #chrome a { color: #cfe0ee; text-decoration: none; background: #1b2229; border: 1px solid #2a333d; border-radius: 8px; padding: 5px 10px; }
+    #chrome a:hover { border-color: #3f5568; }
+    #build { color: #6f8496; }
+
+    header { text-align: center; margin: 54px 16px 8px; }
+    h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: .5px; }
+    h1 .accent { color: #54c98a; }
+    .sub { font-size: 13px; color: #9fb4c7; margin: 0; }
+
+    .hud { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; margin: 14px 0 6px; }
+    .stat { background: #1b2229; border: 1px solid #2a333d; border-radius: 10px; padding: 8px 14px; font-size: 13px; color: #cfe0ee; }
+    .stat b { color: #fff; font-size: 15px; }
+    button { font: 600 13px system-ui, sans-serif; padding: 8px 14px; border: 0; border-radius: 9px; cursor: pointer;
+      background: #2e7d5b; color: #fff; }
+    button.sec { background: #33404c; color: #cfe0ee; }
+    button:disabled { opacity: .45; cursor: default; }
+    button:hover:not(:disabled) { filter: brightness(1.08); }
+
+    /* board */
+    #board { display: grid; grid-template-columns: repeat(7, var(--cell)); grid-template-rows: repeat(7, var(--cell));
+      gap: 6px; margin: 18px auto 8px; --cell: min(11vw, 62px); touch-action: manipulation; }
+    .cell { width: var(--cell); height: var(--cell); position: relative; }
+    .cell.invalid { visibility: hidden; }
+    .hole { position: absolute; inset: 14%; border-radius: 50%; background: #0c0f13; box-shadow: inset 0 2px 5px rgba(0,0,0,.7); }
+    .peg { position: absolute; inset: 10%; border-radius: 50%; cursor: pointer;
+      background: radial-gradient(circle at 34% 30%, #7fe0b0, #2e8b57 62%, #1f5f3c);
+      box-shadow: 0 3px 6px rgba(0,0,0,.5); transition: transform .08s ease, box-shadow .1s ease; }
+    .peg:hover { transform: scale(1.05); }
+    .cell.selected .peg { box-shadow: 0 0 0 3px #ffcf5b, 0 3px 8px rgba(0,0,0,.6); transform: scale(1.06); }
+    .cell.target .hole { background: #14361f; box-shadow: inset 0 0 0 2px #54c98a; cursor: pointer; }
+    .cell.target { cursor: pointer; }
+
+    #msg { min-height: 22px; margin: 6px 0 20px; font-size: 15px; font-weight: 700; text-align: center; }
+    #msg.win { color: #54c98a; } #msg.lose { color: #e8a13b; }
+    footer { margin: 8px 0 30px; font-size: 12px; color: #6f8496; text-align: center; max-width: 460px; padding: 0 16px; }
+  </style>
+</head>
+<body>
+  <div id="chrome"><a href="../../../index.html">← All games</a><span id="build">Peg Solitaire</span></div>
+
+  <header>
+    <h1>Peg <span class="accent">Solitaire</span></h1>
+    <p class="sub">Jump a peg over its neighbour into an empty hole — the jumped peg is removed. Leave one.</p>
+  </header>
+
+  <div class="hud">
+    <div class="stat">Pegs left <b id="pegs">32</b></div>
+    <div class="stat">Moves <b id="moves">0</b></div>
+    <button id="undo" class="sec" disabled>Undo</button>
+    <button id="restart">New game</button>
+  </div>
+
+  <div id="board" aria-label="peg solitaire board"></div>
+  <div id="msg"></div>
+
+  <footer>Tap a peg to pick it up (legal landing holes light up), then tap the hole to jump. A perfect game ends with the last peg in the centre.</footer>
+
+  <script type="module" src="./pegsolitaire.js"></script>
+</body>
+</html>

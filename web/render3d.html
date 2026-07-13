@@ -257,6 +257,8 @@
     <script type="importmap">
       { "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
     </script>
+    <!-- per-deployment config (relay/login endpoints); must run before the modules. -->
+    <script src="./config.local.js"></script>
     <script type="module" src="./render3d.js"></script>
   </body>
 </html>

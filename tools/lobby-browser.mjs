@@ -123,6 +123,12 @@ before(async () => {
   });
   await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', () => rej(new Error('ws error'))); });
   await cdp('Runtime.enable');
+  // Login is now OFF in the shipped bundle until a deployment configures it (config.local.js is neutral).
+  // Simulate a login-enabled deployment: inject __GAMES_CONFIG__ before any page script, then reload so
+  // config.js picks it up. This also exercises the config-bootstrap path end-to-end.
+  await cdp('Page.enable');
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `window.__GAMES_CONFIG__=Object.assign(window.__GAMES_CONFIG__||{},{authIssuer:${JSON.stringify(ISSUER)}});` });
+  await cdp('Page.reload', { ignoreCache: true });
   if (!await waitFor(`!!document.getElementById('people') && !!document.getElementById('tabs')`, { timeout: 15000 })) { skipReason = 'lobby did not load'; return; }
   available = true;
 });

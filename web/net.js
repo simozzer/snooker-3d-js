@@ -11,15 +11,16 @@
 // It knows nothing about draughts, dice, or turns beyond relaying them — the deterministic engines
 // on each client do the actual gameplay from the ordered move-log.
 
+import { relayUrl } from './config.js';
+
 const DEFAULT_URL = () => {
-  // Override with ?relay=ws://host:port or new RelayClient({ url }).
-  if (typeof location === 'undefined') return 'ws://127.0.0.1:8090';
-  const q = new URLSearchParams(location.search).get('relay');
-  if (q) return q;
-  // Behind an HTTPS reverse proxy (e.g. Tailscale Funnel) the relay is same-origin on /relay over
-  // 443. On plain HTTP (LAN / local dev) it's a separate service on its own port.
-  if (location.protocol === 'https:') return `wss://${location.host}/relay`;
-  return `ws://${location.hostname || '127.0.0.1'}:8090`;
+  // Per-visit override wins (?relay=ws://host:port); otherwise config.js decides — same-origin by
+  // default, so this stays correct whether the client is served from the funnel host or a CDN mirror.
+  if (typeof location !== 'undefined') {
+    const q = new URLSearchParams(location.search).get('relay');
+    if (q) return q;
+  }
+  return relayUrl();
 };
 
 export class RelayClient {

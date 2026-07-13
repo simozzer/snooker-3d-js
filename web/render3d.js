@@ -36,6 +36,7 @@ import { encodeFrame, decodeFrame, verifyFrame, variantId as shareVariantId, var
 import { createCueOnline, shotPayload, applyTable, serializeTable } from './games/cue-online.js';
 import { createAuth } from './auth.js';
 import { AUTH } from './auth-config.js';
+import { online as onlineEnabled } from './config.js';
 
 // Variant-driven, like the 2D renderer: all geometry, dimensions, ball appearance, rules, and AI come
 // from the selected variant. This file only draws — the physics/rules/AI are the headless engine the
@@ -562,6 +563,8 @@ function playAiShot(shot) {
 
 el('trajectory').addEventListener('change', refreshHumanPreview);
 
+// Offline build (no backend): drop the "Play online" opponent so only local / vs-AI play remains.
+if (!onlineEnabled()) el('aimode').querySelector('option[value="online"]')?.remove();
 const onlineMode = () => el('aimode').value === 'online';
 const aiEnabled = () => { const m = el('aimode').value; return m !== 'human' && m !== 'online'; }; // else vs AI / self-play
 const selfPlay = () => el('aimode').value === 'self';

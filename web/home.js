@@ -8,10 +8,21 @@ import { VERSION } from './version.js';
 import { createAuth } from './auth.js';
 import { AUTH } from './auth-config.js';
 import { RelayClient } from './net.js';
+import { online } from './config.js';
 
 const el = (id) => document.getElementById(id);
 el('version').textContent = `v${VERSION}`;
 
+// Offline build (no backend): strip the online chrome entirely — no reachability light, no login bar,
+// no Community link — and never open a socket. Every game card is a plain local link and still works.
+if (!online()) {
+  el('mp-section')?.remove();
+  const ab = el('authbar'); if (ab) ab.style.display = 'none';
+} else {
+  wireOnline();
+}
+
+function wireOnline() {
 // --- multiplayer reachability light -------------------------------------------------------------
 const netstat = el('netstat');
 function setNetStat(state, label) {
@@ -42,3 +53,4 @@ el('logout').addEventListener('click', () => auth.logout());
   updateAuthUI();
   if (auth.enabled) { try { await auth.handleRedirect(); } catch { /* stay anonymous */ } updateAuthUI(); }
 })();
+}

@@ -13,6 +13,14 @@ const OVERRIDE = (typeof globalThis !== 'undefined' && globalThis.__GAMES_CONFIG
 const loc = typeof location !== 'undefined' ? location : null;
 const isHttps = !!loc && loc.protocol === 'https:';
 
+// The master online switch. Defaults ON, so the live deployment is unchanged. A build that sets
+// __GAMES_CONFIG__.online = false (e.g. a public CDN mirror with no backend) gets a purely local
+// artifact: the pages never open a relay socket and every online affordance — the reachability light,
+// the login bar, the Community link, the "Play online" mode — is removed rather than shown failing.
+export function online() {
+  return OVERRIDE.online !== false;
+}
+
 // The multiplayer relay WebSocket, same-origin by default: behind an HTTPS reverse proxy it's /relay on
 // 443; on plain-HTTP LAN/dev it's a sibling service on :8090. Overridable via __GAMES_CONFIG__.relayUrl
 // (and, per-visit, the ?relay= query param handled in net.js). Served from a foreign CDN origin with no

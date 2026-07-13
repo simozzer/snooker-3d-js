@@ -2,6 +2,7 @@ import { VERSION } from './version.js';
 import { RelayClient } from './net.js';
 import { createAuth } from './auth.js';
 import { AUTH } from './auth-config.js';
+import { online } from './config.js';
 // board.js — the harness that turns board.html into a switchable board-game shell. It reads the
 // ?game= query string, lazily imports the matching view module, and drives it through one small
 // contract shared by chess / draughts / backgammon. All the outer chrome (opponent + difficulty
@@ -140,7 +141,9 @@ if (!entry) {
       // --- online play (lobby + relay orchestration) -----------------------------------------
       // The relay + move-log are game-agnostic; this block owns the lobby UI and routes relay events
       // to the view's optional online contract. Only games that implement onlineStart offer it.
-      const onlineOk = typeof controller.onlineStart === 'function';
+      // Offline build (no backend): remove the "Play online" mode so only local play remains.
+      if (!online()) el('mode').querySelector('option[value="online"]')?.remove();
+      const onlineOk = typeof controller.onlineStart === 'function' && online();
       const netStatus = (html) => { el('net-status').innerHTML = html; };
 
       // --- identity (optional OIDC login via Keycloak; see web/auth-config.js) ----------------
@@ -358,7 +361,7 @@ if (!entry) {
           try { await auth.handleRedirect(); } catch { ui.status('Login didn’t complete — please try again.'); }
           updateAuthUI();
         }
-        await probeRelay(); // always show the reachability light — connect on load, regardless of game/mode
+        if (online()) await probeRelay(); // reachability light — connect on load (offline build: skip entirely)
         // Deep link from an invite (board.html?game=…&join=CODE): open the lobby and join automatically.
         const joinParam = (params.get('join') || '').trim().toUpperCase();
         if (joinParam && onlineOk) { el('mode').value = 'online'; applyMode('online'); await joinRoom(joinParam); }

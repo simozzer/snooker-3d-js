@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>🧩 Sidoku</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+        <!-- game engine (classic scripts, original load order; word search removed) -->
+        <script src="./src/sidpuzzle.js"></script>
+        <script src="./src/sidevents.js"></script>
+        <script src="./src/sidqueries.js"></script>
+        <script src="./src/sidrender.js"></script>
+        <script src="./src/sidsolver.js"></script>
+        <script src="./src/sisdata.js"></script>
+        <script src="./src/sidgame.js"></script>
+        <script src="./src/sidplayerdata.js"></script>
+        <script src="./src/SidukoBonuses.js"></script>
+        <script src="./src/sidboost.js"></script>
+        <script src="./src/sidukomain.js"></script>
+        <script src="./src/SidukoConstants.js"></script>
+        <script src="./src/sidsounds.js"></script>
+        <script src="./src/sinotifications.js"></script>
+        <script src="./src/sideffects.js"></script>
+
+        <!-- flattened, build-free CSS (utilities + reset first, then game styles) -->
+        <link rel="stylesheet" href="./css/utilities.css">
+        <link rel="stylesheet" href="./css/sidoku.css">
+
+        <style>
+            /* compendium chrome */
+            #sidoku-chrome{position:fixed;top:6px;left:8px;z-index:9999;font:600 12px/1 system-ui,sans-serif;
+                display:flex;gap:10px;align-items:center;}
+            #sidoku-chrome a{color:#0b3d91;text-decoration:none;background:rgba(255,255,255,.85);
+                border:1px solid rgba(0,0,0,.15);border-radius:6px;padding:3px 8px;}
+            #sidoku-chrome a:hover{background:#fff;}
+            #sidoku-build{color:#334155;background:rgba(255,255,255,.7);border-radius:6px;padding:3px 7px;}
+        </style>
+    </head>
+
+    <body onLoad="doGameLoaded()" class="bg-orange-200 flex flex-col min-h-svh">
+        <div id="sidoku-chrome">
+            <a href="../../../index.html">← All games</a>
+            <span id="sidoku-build">Sidoku</span>
+        </div>
+
+        <div class="mx-auto text-center block bg-sky-500 p-2 min-w-full">
+            <div class="inline-block">
+                <div class="text-center text-3xl">🧩Sidoku</div>
+                <div class="fg-blue-100 text-sm" >A game based on Sudoku</div>
+            </div>
+            <div class="float-right clear-none">
+                <div id="playerStatus">
+                    <h4>Guesses Left: </h4>
+                    <div id="playerGuessesRemaining"></div>
+                    <hr/>
+                    <h4>Funds: </h4>
+                    <div id="playerFunds"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="h-full grow">
+            <div class="area">
+                <ul class="circles">
+                    <li>1</li>
+                    <li>2</li>
+                    <li>3</li>
+                    <li>4</li>
+                    <li>5</li>
+                    <li>6</li>
+                    <li>7</li>
+                    <li>8</li>
+                    <li>9</li>
+                    <li>?</li>
+                </ul>
+            </div>
+            <div id="menucontainer" class="p-4 mx-auto text-center bg-indigo-300">
+                <label for="menu" class="3xl">Choose a level:</label>
+                <select name="menu" id="menu" class="bg-white border-blue-800 border-separate">
+                    <option value="None"></option>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
+                    <option value="Diabolical">Diabolical</option>
+                </select>
+
+
+                <div id="charset_menu" class="list-none">
+
+                    <div>Choose a character set</div>
+                    <a href="?charset=classic">Numeric</a>
+                    <a href="?charset=alpha">Alpha</a>
+                    <a href="?charset=emoji">Emoji</a>
+                    <a href="?charset=roman">Roman</a>
+                    <a href="?charset=color">Color</a>
+                    <a href="?charset=fractions">Fractions</a>
+                    <a href="?charset=arrows">Arrows</a>
+                    <a href="?charset=numcircles">Numeric Circles</a>
+                    <a href="?charset=braille">Braille</a>
+                    <a href="?charset=spelling">Spelling</a>
+                </div>
+
+            </div>
+            <div id="introScreen">
+                <div class="text-center p-4">
+                    <div class="font-bold">The Thing Is</div> <br/>
+                    Solve a puzzle within the timeout, or don't — it's really up to you. <br/><br/>
+                    You can buy bonuses like the 'Hints' which appear for the cells.<br/><br/>
+                    Earn cash for bonuses by filling lines, columns or inner tables.<br/><br/>
+                    Choose a level of difficulty to start playing. <br/>
+                    <br/><br/>
+                    <hr/><br/><br/>
+                    <div class="bg-slate-400 text-blue-950 italic p-4">
+                        <h4>This is a work in progress</h4><br/>
+                        The rules of the game are evolving. I'll be trying to adjust it to make it fast but fun, whilst also being challenging.<br/><br/>
+
+                        <h4>If you complete a puzzle just refresh your browser to start again, on a brand new puzzle.</h4><br/>
+                        <h5>If you just want to play Sudoku then just ignore the timer and carry on playing when the time runs out</h5><br/>
+                    </div>
+                    <br/>
+                    <div class="bg-red-300 text-red-300 font-light justify-center italic show-cheat">For testing purposes there is a 'cheat mode'.  Just add '&amp;cheat=iamcheating' to the url</div>
+                </div>
+            </div>
+            <div id="mainGameArea" class="hidden">
+                <div class="flex justify-center p-4">
+                    <div id="leftPanel" class="bg-gradient-to-r from-violet-600 to-indigo-600 overflow-hidden">
+
+                    </div>
+                    <div id="everywhere" class="p-6 py-8">
+
+                        <div class="flex text-yellow-70">
+                            <div class="boostInformation text-center" id="boostinformation">
+                                <div class="boost_group">
+                                    <label for="availableBoosts" class="hidden">Available/Active Boosts</label>
+                                    <div id="availableBoosts" name="availableBoosts" class="flex-wrap boost-group"></div>
+                                </div>
+                                <div class="boost_group">
+                                    <label for="unavailableBoosts" class="hidden">Boosts To Buy/Unavailable</label>
+                                    <div id="unavailableBoosts" name="unavailableBoosts" class="bg-slate-600 text-slate-400 flex-wrap boost-group"></div>
+                                </div>
+                                <div class="boost_group">
+                                    <label for="passiveBoosts" class="hidden">Passive Boosts</label>
+                                    <div id="passiveBoosts" name="passiveBoosts" class="flex-wrap boost-group bg-slate-500">
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+
+                    </div>
+                </div>
+                    <div class="progressBarContainer p-4">
+                        <div id="progressBarProgress" class="progressBarProgress bg-gradient-to-r from-red-400 to-green-600"></div>
+                        <div id="progressBarTextOverlay">
+                        </div>
+                    </div>
+
+                    <div class="entryTimerBarContainer p-2 bg-slate-400 hidden" id="entryTimerBarContainer">
+                        <div id="entryTimerBarProgress" class="entryTimerBarProgress bg-gradient-to-r from-red-400 to-green-600"></div>
+                        <div id="entryTimerBarTextOverlay">
+                            Rapid Entry Timer. This will eventually give boosts for quick answers
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <div id="cellValueEntryPopup" class="cellValueEntryPopup hidden" tabindex="-1">
+            <table>
+                <tr><td>1</td><td>2</td><td>3</td></tr>
+                <tr><td>4</td><td>5</td><td>6</td></tr>
+                <tr><td>7</td><td>8</td><td>9</td></tr>
+                <tr><td colspan="3" id="cellValueClearButton">Clear</td></tr>
+            </table>
+        </div>
+        <div id="alert" class="hidden">Alert</div>
+        <div id="info" class="hidden">Info</div>
+        <div id="bonus_message" class="hidden">Bonus</div>
+        <div id="help_text" class="hidden">How to play</div>
+
+        <div id="boost_menu_popup" class="hidden text-center p-4" tabindex="-1">
+            <div id="boost_menu_popup_text"></div>
+            <div id="boost_menu_popup_lives" class="text-center text-slate-300 mx-auto flex items-center justify-center p-1"></div>
+            <div class="p-4 justify-center flex">
+                <div id="boost_menu_popup_use_button" class="use_boost_button boost_menu_popup_button">Use</div>
+                <div id="boost_menu_popup_buy_button" class="buy_boost_button boost_menu_popup_button">Buy</div>
+                <div id="boost_menu_popup_boost_button" class="buy_boost_button hidden boost_menu_popup_button">Boost</div>
+            </div>
+        </div>
+
+        <footer class="flex mx-auto align-bottom 3xl bg-slate-600 min-w-full content-center">
+            <div class="text-5xl min-w-full text-center p-5">
+                🏃‍♂️SPEED COUNTS🏃‍♂️
+            </div>
+        </footer>
+
+        <script type="module">
+            import { VERSION } from '../../version.js';
+            const el = document.getElementById('sidoku-build');
+            if (el) el.textContent = 'Sidoku · v' + VERSION;
+        </script>
+    </body>
+
+</html>

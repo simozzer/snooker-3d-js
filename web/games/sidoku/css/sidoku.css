@@ -1,0 +1,1229 @@
+/* (tailwind import removed — flattened to plain CSS) */
+@keyframes doFlipHorz {
+  from {
+    transform: scaleX(1);
+    color:red;
+  }
+  to {
+    transform: scaleX(-1);
+    color:green;
+  }
+
+}
+.flipHorz {  
+	animation-name: doFlipHorz;
+	animation-duration: 2s;
+}
+.flippedHorz {
+	transform: scaleX(-1);
+}
+
+@keyframes doFlipVert {
+  from {
+    transform: scaleY(1);
+    color:red;
+  }
+  to {
+    transform: scaleY(-1);
+    color:blue;
+  }
+
+}
+.flipVert {
+  animation-name: doFlipVert;
+  animation-duration: 2s;
+}
+.flippedVert {
+	transform: scaleY(-1);
+}
+
+#boost_menu_popup {
+	position: absolute;
+	background-color: darkslategrey;
+	color:white;
+	padding: 6px;
+	user-select: none;
+}
+
+
+#everywhere {
+	opacity: 95%;
+	padding-left:0.5rem;padding-right:0.5rem;
+}
+
+.sidukoTable table {
+    border-color:#fff;
+    border-width:10px;
+    background-color:#1e293b;
+	opacity: 70%;
+	border-spacing: 3px;
+	filter: drop-shadow(26px 26px 30px aqua);
+}
+
+.sidukoTable .cell {
+    border-width:2px;
+    vertical-align:middle;
+	animation: color_change 2s infinite alternate;
+}
+
+@keyframes color_change {
+	from { background-color: rgb(68, 68, 106); }
+	to { background-color: rgb(111, 142, 210); }
+}
+
+.sidukoTable table td {
+    width:2.5rem;
+    height:2.5rem;
+    text-align:center;
+    color:#1e293b;
+    font-size:1.5rem;line-height:2rem;
+		user-select: none;
+    width: 5em;
+}
+
+@keyframes doCellHighlight {
+	from {
+		border: 1px solid red;
+		background-color: black;
+		opacity: 0;
+	}
+	to {
+		border: 2px solid lightseagreen;
+		background-color: white;
+		opacity: 1;
+	}
+}
+
+.sidukoTable table td.cell-highlight {
+	animation: doCellHighlight 0.8s;
+}
+
+@keyframes eraseCellValue {
+	from {
+		opacity: 1;
+		color:red;
+	}
+	to {		
+		opacity: 0;
+		color:white;
+	}
+}
+
+
+.sidukoTable table td.erasing_value{
+	 animation-name: eraseCellValue;
+	 animation-duration: 2s;
+}
+
+.sidukoTable table td:hover {
+    background-color:#7dd3fc;
+}
+
+.sidukoTable table td:focus {
+    background-color:#fef08a;
+}
+
+.sidukoTable table td.solved {
+    font-weight:700;
+    background-color:#bae6fd;
+}
+
+.sidukoTable table td.entered {
+    font-weight:300;
+    background-color:#3730a3;
+    color:#fff;
+}
+
+.sidukoTable table td.fixedval {
+    font-weight:700;
+    color:#b91c1c;
+    background-color:#fca5a5;
+}
+
+.sidukoTable table td.suggested {
+    font-weight:300;
+    color:#172554;
+    background-color:#bbf7d0;
+}
+
+.sidukoTable table td.aided {
+    font-weight:300;
+    color:#1f2937;
+    background-color: yellow;
+}
+
+@keyframes spinValueEntered   {
+    from {
+        rotate: 0deg;		
+    }
+    to {
+        rotate: 360deg;
+    }    
+}
+.sidukoTable table td.value_entered {
+    animation-name: spinValueEntered;
+    animation-duration: 0.6s;
+}
+
+@keyframes badValueEntered   {
+	from {
+		border: 5px solid cyan;	
+	}
+	to {
+		border: 1px solid red;		
+	}    
+}
+.sidukoTable table td.entered.badValue {
+	animation-name: badValueEntered;
+	animation-duration: 4s;
+}
+
+@keyframes doHomeRun {
+	from {
+		color:black;
+		background-attachment: white;
+		font-weight:800;
+		rotate:0deg;
+	}
+	to {
+		color:white;
+		background-color: black;
+		font-weight: 200;
+		rotate:-360deg;
+	}
+	
+}
+
+.sidukoTable table td table td.homeRun {
+	animation-name: doHomeRun;
+	animation-duration: 0.9s;
+}
+
+#rightPanel {
+    background-color: black;
+    margin-top:24px;
+		margin-left:2px;
+    color: green;
+    opacity: 0.6;
+    border-radius: 20px;    
+}
+
+#playerStatus {	
+	text-align: center;
+	height: 10%;
+	margin: 4px;  
+}
+
+#playerStatus h4 {
+	color: darkslategrey;
+	font-weight: 500;
+	clear: left;
+	display: inline;	
+}
+
+#playerStatus div {
+	clear: right;
+	display: inline;	
+	color:darkblue;
+	font-weight: 600;
+}
+
+#alert {
+	position: absolute;
+	border: 3px dotted green;
+	background-color: rgb(149, 11, 11);
+	color: black;
+	padding: 12px;
+	font-size: 1.6em;
+	z-index: 20;
+	top: 700px;
+	left: 15px;
+}
+
+.show-cheat:hover {
+	color:red;
+}
+
+.boost-group {
+	justify-content: center;
+	padding: 6px;
+}
+
+.boost_glyph {
+	font-size: 1.2em;
+	line-height: 1.2em;
+	color: blue;
+	border-radius: 10px;
+	text-align: center;
+	display: inline-block;
+	margin: 4px;
+	vertical-align: middle;
+	padding-top: 0.6em;
+}
+
+.boost_glyph:hover {
+  cursor: pointer;
+  background-color: #072307;
+  color: rgb(126, 249, 167);
+  border: 4px solid darkgreen;
+}
+
+.boost-group .boost_glyph {
+    height: 50px;
+    width: 50px;
+    filter: drop-shadow(2px -1px 10px azure);
+}
+
+#passiveBoosts .boost_glpyh {
+	background-color: rgb(68, 37, 108);
+}
+
+
+.boostInformation {
+	background-color: darkslateblue;
+	border: 6px double cornflowerblue;
+	border-radius: 10px;
+	font-size: 0.9em;
+	filter: drop-shadow(-26px 26px 30px lightblue);
+}
+
+
+#unavailableBoosts {
+	background-color: darkgray;
+}
+
+
+#passiveBoostS {
+	opacity: 0.5;
+}
+
+.boost-group {
+	background-color: whitesmoke;
+    border: 6px double lightslategrey;
+    color: grey;
+    margin: 4px;
+}
+
+#unavailableBoosts .boost_glyph {
+	background-color: darkgray;
+}
+
+.no_lives_left {
+	display: none;
+}
+
+@keyframes show_alert_one {
+	from {
+		opacity: 0.3;
+		color: white;
+		background-color: black;
+		font-size: 1.5em;
+		padding: 20px;
+	}
+	to {
+		opacity: 1;
+		color: rgb(42, 26, 26);
+		background-color: rgb(234, 234, 228);
+		font-size: 1em;
+		padding:60px;
+	}
+}
+
+.show_alert {
+	animation-name: show_alert_one;
+  animation-duration: 3s;
+}
+
+
+#info {
+	position: absolute;
+	border: 5px dashed white;
+	background-color: #c1e4ea;
+	color: blue;
+	padding: 20px;
+	font-size: 1.6em;
+	z-index: 20;
+	width: 300px;	
+	top: 700px;
+}
+
+@keyframes show_info_one {
+	from {
+		opacity: 0.5;
+		color: white;
+		background-color: black;
+		font-size: 0.8em;
+		padding: 80px;
+	}
+	to {
+		opacity: 1;
+		color: rgb(43, 203, 75);
+		background-color: rgb(34, 34, 20);
+		font-size: 1.5em;
+		padding:20px;
+	}
+}
+
+.show_info {
+	animation-name: show_info_one;
+  animation-duration: 3s;
+}
+
+#bonus_message {
+	position: absolute;
+	border: 5px dashed rgb(37, 6, 149);
+	background-color: #c1e4ea;
+	color: blue;
+	padding: 20px;
+	font-size: 1.2em;
+	z-index: 20;
+	width: 300px;
+	text-align: center;
+	vertical-align: middle;
+	left: calc((100% - 150px) / 2);
+}
+
+@keyframes show_bonus_one {
+	from {
+		opacity: 0.5;
+		color: rgb(5, 5, 62);
+		background-color: rgb(219, 226, 229);
+		font-size: 0.5em;
+		padding: 80px;
+	}
+	to {
+		opacity: 1;
+		color: rgb(45, 214, 104);
+		background-color: rgb(4, 4, 2);
+		font-size: 1.5em;
+		padding:20px;
+	}
+}
+
+.show_bonus {
+	animation-name: show_bonus_one;
+  animation-duration: 3s;
+}
+
+
+
+
+@keyframes fade_intro_screen {
+	from {
+		opacity: 1;	
+		font-size: large;
+
+	} 
+	to {
+		opacity: 0;
+		height: 0;
+		font-size: 0%;
+	}
+}
+
+.fadeIntro {
+	animation-name: fade_intro_screen;
+	animation-duration: 2.5s;
+}
+
+
+@keyframes fadeLogMessage   {
+    from {
+        color: lightgreen;                
+    }
+    to {
+        color: black;        
+    }    
+}
+
+#bonusButton:disabled {
+    background-color: grey;
+    cursor: not-allowed;
+}
+
+.progressBarContainer {
+	margin: 8px;
+	height: 5em;
+	width: calc(100%-16px);
+	background-color: white;
+	border: 2px solid blue;
+}
+
+.progressBarProgress {
+	height: 3em;
+	width: 30%;
+	background-color:rgba(223, 8, 58, 0.349);
+}
+
+
+#progressBarTextOverlay {	
+	position: relative;
+	width: 100%;
+	text-align: center;
+	margin-top: -1.7em;
+	font-size: 1.8em;
+}
+
+#entryTimerBarProgress {
+	height: 1em;
+	width: 30%;
+	background-color:rgba(223, 8, 58, 0.349);
+}
+
+#entryTimerBarTextOverlay {	
+	position: relative;
+	width: 100%;
+	text-align: center;
+	margin-top: -1.3em;
+	font-size: 1em;
+	line-height: 1em;
+}
+
+
+
+#playerBoostsTableBody tr.exhausted {
+	color: #ab9a9ade;
+	background-color: #402e5d;
+	font-style: italic;
+	font-family: math;
+	font-size: medium;
+	line-height: 1em;
+}
+
+#playerBoostsTableBody tr {
+	padding-top:4x;
+	margin:4px;
+	border: 1px solid blue;
+}
+
+.useBoostButton {
+	border: 2px solid #5a00ff;
+    border-radius: 8px;
+    background-color: #c1e4ea;
+    font-size: 1em;
+    padding: 0 8px;
+    color: red;
+}
+
+.useBoostButton:hover {
+	border: 2px solid #2396e8;
+    border-radius: 8px;
+    background-color: #4a7076;
+    font-size: 1em;
+    padding: 0 8px;
+    color: rgb(28, 57, 110);
+}
+
+.buyBoostButton:hover {
+	background-color: #5a00ff;
+    color: white;
+}
+
+
+#playerBoostsTableBody tr.forSale .buyBoostButton {
+	border: 2px solid yellow;
+    border-radius: 8px;
+    background-color: blue;
+    font-size: 1em;
+	padding: 0 8px;
+	display: block;
+}
+
+@keyframes puzzlesolvedCells {
+    from {
+        transform: rotate(0deg);
+        height: 600px;
+        width: 600px;
+        border: 10px solid black;
+        border-radius: 300px;        
+    }
+
+    to {
+        transform: rotate(720deg);
+        height: 40px;
+        width: 40px;
+        border: 1px solid red;
+        border-radius: 3px;
+    }
+}
+
+@keyframes puzzlesolvedTable {
+    from {
+        transform: rotate(0deg);    
+    }
+
+    to {
+        transform: rotate(-720deg);
+    }
+}
+
+
+
+@keyframes  game_start_anim {
+    from {
+        transform: rotate(0deg);    
+		opacity: 0;
+    }
+
+    to {
+        transform: rotate(-720deg);
+		opacity: 1;
+    }
+}
+
+#mainGameArea.gameStart {
+	animation-name: game_start_anim;
+    animation-duration: 3s;
+}
+
+
+.sidukoTable.solved table td {
+    animation-name: puzzlesolvedCells;
+    animation-duration: 2s;
+}
+
+@keyframes puzzleGrantedCells {
+    from {
+        border: 8px solid red;    
+		padding: -8px;  
+        background-color: chartreuse;  
+    }
+    to {
+        border: 1px solid white;
+		padding: 0px;
+        background-color: cornsilk;
+    }
+}
+
+.sidukoTable table td.aided.granted {
+    animation-name: puzzleGrantedCells;
+    animation-duration: 1.3s;
+}
+
+.sidukoTable table td.player_solved {
+    color: #4e54c8;
+    background-color: black;
+}
+
+#charset_menu {
+	margin: 10px;
+	background-color: lightgray;
+	margin-left: 30%;
+	margin-right: 30%;
+	padding: 8px;
+}
+
+#charset_menu a {
+	padding-left: 8px;
+	color: navy;
+}
+
+#charset_menu a:hover {
+	padding-left: 8px;
+	text-decoration: underline;
+	color: rgb(128, 0, 119);
+}
+
+#charset_menu a.active_charset {
+	font-weight: 800;
+	color:blue;
+}
+
+.btn {
+    font-weight:700;padding-top:0.5rem;padding-bottom:0.5rem;padding-left:1rem;padding-right:1rem;border-radius:0.25rem;
+}
+.btn-blue {
+    background-color:#3b82f6;color:#fff;
+}
+.btn-blue:hover {
+    background-color:#1d4ed8;
+}
+
+@keyframes fade {
+	from {		
+		opacity : 1;
+		border-color:#02f702
+	}
+	to {		
+		opacity: 0;
+		border-color:black;
+	}
+}
+
+.messageBox {
+	position: relative;
+	z-index: 10;
+	background-color: LAVENDER;
+	padding: 20px;
+	border: 6px double red;
+	border-radius: 8px;
+	font-size: 1.1em;
+	text-align: center;
+	font-weight: 800;
+}
+
+.messageBox.initial {
+	animation-name: fade;
+	animation-duration: 1.5s;
+	display: block;
+}
+
+@keyframes fundBoost {
+	from {
+		font-size: 0.1em;
+		color:white;
+	}
+	to {
+		font-size: 2em;
+		color: red;
+	}
+}
+
+#playerFunds.fund-boost {
+	animation-name: fundBoost;
+    animation-duration: 1s;
+}
+
+.boostBoostButton {
+    background-color: darkcyan;
+    border: 3px solid yellow;
+    border-radius: 6px;
+    padding: 0px 8px;
+	color: floralwhite;
+}
+
+.boostBoostButton:hover {
+    background-color: rgb(138, 212, 212);
+    border: 3px solid rgb(65, 20, 55);
+	color: rgb(136, 100, 26);
+}
+
+
+
+.buyBoostButton {
+	background-color: white;
+	border: 1px solid black;
+	color: black;
+	padding: 0px 10px;
+	border-radius: 10px;
+}
+
+@keyframes fundReduce {
+	from {
+		font-size: 2em;
+		color:green;
+	}
+	to {
+		font-size: 0.1;
+		color: red;
+	}
+}
+
+
+#playerFunds.fund-reduce {
+	animation-name: fundReduce;
+    animation-duration: 1s;
+}
+
+
+@keyframes shake {
+	from {
+		rotate: 0.3deg;
+		opacity: 1;
+		background-color: cornsilk;
+		border:1px solid green;
+		border-radius: 1%;
+	}
+	to {
+		rotate: -0.3deg;
+		opacity: 0.75;
+		background-color: aqua;
+		border: 1px solid yellow;
+		border-radius: 10px;
+	}
+}
+
+div#playerStatus {
+    animation: shake 0.8s ease-in-out infinite alternate;
+}
+
+
+.cellValueEntryPopup {
+    position: absolute;
+    display: block;
+    border: 2px solid gray;
+    background-color: ghostwhite;
+    padding: 6px;
+	border-radius:20px;
+	user-select: none;
+}
+
+.cellValueEntryPopup:hidden {
+	display: none
+}
+
+.cellValueEntryPopup td {
+    padding: 16px;
+    border: 1px solid #e5ced0;    
+    margin: 9px;
+    background-color: lightyellow;
+    font-weight: 600;
+    font-size: 1.5em;
+		text-align: center;
+}
+
+.cellValueEntryPopup table tr td:hover {
+    padding: 16px;
+    border: 1px solid red;
+    background-color: rgb(90, 90, 73);    	
+}
+
+
+.cellValueEntryPopup td.suggested {
+	background-color:lightblue;
+	color: #5a00ff;
+	font-weight: 800;
+}
+
+.cellValueEntryPopup td:hover {
+    padding: 16px;
+    border: 1px solid gray;    
+    background-color: rgb(90, 90, 73);    
+	color:rgb(15, 10, 10)
+}
+
+/* Slide item out top left*/
+@keyframes slide_out_top_left_cell {
+	from {
+		opacity: 1;
+		background-color: white;
+		rotate: 0deg;
+		font-size:1em;
+	}
+	to {
+		opacity: 0;
+		top: 0px;
+		left: 0px;
+		rotate: 360deg;
+		background-color: black;
+		font-size:3em;
+	}
+}
+.slide_out_top_left {
+	animation-name: slide_out_top_left_cell;
+	animation-duration: 0.8s;
+}
+
+/* Slide item out bottom left*/
+@keyframes slide_out_bottom_left_cell {
+	from {
+		opacity: 1;
+		background-color: firebrick;
+		rotate: 0deg;
+		font-size:1em;
+	}
+	to {
+		opacity: 0;
+		top: 100%;
+		left: 0px;
+		rotate: -360;
+		background-color: goldenrod;
+		font-size:4em;
+	}
+}
+.slide_out_bottom_left {
+	animation-name: slide_out_bottom_left_cell;
+	animation-duration: 0.9s;
+}
+
+/* Slide item out top right*/
+@keyframes slide_out_top_right_cell {
+	from {
+		opacity: 1;
+		background-color: brown;
+		rotate: 0deg;
+		font-size:1em;
+	}
+	to {
+		opacity: 0;
+		top: 0px;
+		left: 100%;
+		rotate: 180deg;
+		background-color: burlywood;
+		font-size:1.5em;
+	}
+}
+.slide_out_top_right {
+	animation-name: slide_out_top_right_cell;
+	animation-duration: 0.7s;
+}
+
+/* Slide item out bottom left*/
+@keyframes slide_out_bottom_right_cell {
+	from {
+		opacity: 1;
+		background-color: aqua;
+		rotate: 0deg;
+		font-size:1em;
+	}
+	to {
+		opacity: 0;
+		top: 100%;
+		left: 100%;
+		rotate: -180deg;
+		background-color: red;
+		font-size:1.2em;
+	}
+}
+.slide_out_bottom_right {
+	animation-name: slide_out_bottom_right_cell;
+	animation-duration: 0.4s;
+}
+
+/* Slide item out bottom right*/
+@keyframes slide_out_bottom_right_cell {
+	from {
+		opacity: 1;
+		background-color: orange;
+		rotate: 0deg;
+		font-size:1em;
+	}
+	to {
+		opacity: 0;
+		top: 100%;
+		left: 100%;
+		rotate: 720deg;
+		background-color: orangered;
+		font-size:6.2em;
+	}
+}
+.slide_out_bottom_right {
+	animation-name: slide_out_bottom_right_cell;
+	animation-duration: 0.9s;
+}
+
+/* Slide item out mid left*/
+@keyframes slide_out_mid_left_cell {
+	from {
+		opacity: 1;
+		background-color: purple;
+		rotate: 0deg;
+		font-size:1em;
+	}
+	to {
+		opacity: 0;
+		top: 50%;
+		left: 0;
+		rotate: -720deg;
+		background-color: lightpink;
+		font-size:6em;
+	}
+}
+.slide_out_mid_left {
+	animation-name: slide_out_mid_left_cell;
+	animation-duration: 0.6s;
+}
+
+/* Slide item out mid right*/
+@keyframes slide_out_mid_right_cell {
+	from {
+		opacity: 1;
+		background-color: yellow;
+		rotate: 0deg;
+		font-size:1em;
+	}
+	to {
+		opacity: 0;
+		top: 50%;
+		rotate: 1080deg;
+		left: 100%;
+		background-color: orange;
+		font-size:3em;
+	}
+}
+.slide_out_mid_right {
+	animation-name: slide_out_mid_right_cell;
+	animation-duration: 0.6s;
+}
+
+/* Slide item out mid top*/
+@keyframes slide_out_mid_top_cell {
+	from {
+		opacity: 1;
+		background-color: lightblue;
+		rotate: 0deg;
+		font-size:1em;
+	}
+	to {
+		opacity: 0;
+		top: 0;
+		left: 50%;
+		rotate: -1080deg;
+		background-color: darkblue;
+		font-size:2em;
+	}
+}
+.slide_out_mid_top {
+	animation-name: slide_out_mid_top_cell;
+	animation-duration: 0.9s;
+}
+
+/* Slide item out mid bottom*/
+@keyframes slide_out_mid_bottom_cell {
+	from {
+		opacity: 1;
+		background-color: green;
+		rotate: 0deg;
+		font-size: 1em;
+	}
+	to {
+		opacity: 0;
+		top: 100%;
+		left: 50%;
+		background-color: lightgreen;
+		font-size: 5em;
+	}
+}
+.slide_out_mid_bottom {
+	animation-name: slide_out_mid_bottom_cell;
+	animation-duration: 0.8s;
+}
+
+
+.boost_menu_popup_button {
+	text-align: center;
+	font-weight: 300;
+	background-color: white;
+	color: black;
+	border: 3px solid antiquewhite;
+	border-radius: 4px;
+	user-select: none;
+	margin-right: 8px;
+	float: left;
+}
+
+.boost_menu_popup_button:hover {
+	font-weight: 500;
+	background-color: lightpink;
+	color: darkblue;	
+}
+
+
+tr.exhausted .boost_glyph {
+	opacity: 0.5;
+	font-size: 0.8em;
+	line-height: 1.1em;
+	background-color: black;
+	color: lightslategray;
+	border: 2px solid white;
+}
+
+.boost_button {
+  text-align: center;
+  display: inline-block;
+}
+
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*Start Animations*/
+@keyframes animatetop {
+	from {
+		top: -300px;
+		opacity: 0.4;
+		font-size: x-small;
+	}
+	to {
+		top: 0;
+		opacity: 1;
+		font-size: large;
+	}
+}
+@keyframes zoomIn {
+	0% {
+		opacity: 0;
+		-webkit-transform: scale3d(0.3, 0.3, 0.3);
+		transform: scale3d(0.3, 0.3, 0.3);
+	}
+	50% {
+		opacity: 1;
+	}
+}
+.hidden {
+    display: none
+}
+
+@keyframes doSpinLeft {
+	to {
+		rotate: 360deg;
+		transform: scaleY(-1);
+	}	
+}
+.spinLeft {
+	animation-name: doSpinLeft;
+	animation-duration: 3.5s;
+}
+@keyframes doSpinRight {
+	to {
+		rotate: -360deg;
+		transform: scaleY(1);
+	}	
+}
+.spinRight {
+	animation-name: doSpinRight;
+	animation-duration: 3.5s;
+}
+
+
+.area.color1 {
+	background-color: #3f7498;
+	transition: background-color 8s;
+}
+
+.area.color2 {
+	background-color: lightcyan;
+	transition: background-color 8s;
+}
+
+.area.color3 {
+	background-color: #4e54c8;
+	transition: background-color 8s;
+}
+
+.area.color4 {
+	background-color: #2396e8;
+	transition: background-color 8s;
+}
+
+#introScreen {
+	filter: drop-shadow(-50px 50px 50px lightyellow);
+	opacity: 0.95;
+}
+/*End Animations*/
+/*
+-- Start BackGround Animation 
+*/
+.area {
+	background: #4e54c8;
+	background: -webkit-linear-gradient(to left, #8f94fb, #4e54c8);
+	width: 100%;
+	height: 100vh;
+	position: absolute;
+	z-index: -1;
+}
+
+.circles {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 96%;
+	overflow: hidden;
+}
+
+
+
+.circles li {
+    position: absolute;
+    display: block;
+    background: rgba(255, 255, 255, 0.2);
+    animation: animate 20s linear infinite;
+    bottom: -150px;
+    line-height: 8em;
+    font-size: 8em;
+}
+
+.circles li:nth-child(1) {
+	left: 25%;
+	width: 80px;
+	height: 80px;
+	animation-delay: 0s;
+}
+
+.circles li:nth-child(2) {
+	left: 10%;
+	width: 20px;
+	height: 20px;
+	animation-delay: 2s;
+	animation-duration: 3s;
+}
+
+.circles li:nth-child(3) {
+	left: 70%;
+	width: 20px;
+	height: 20px;
+	animation-delay: 4s;
+}
+
+.circles li:nth-child(4) {
+	left: 40%;
+	width: 60px;
+	height: 60px;
+	animation-delay: 0s;
+	animation-duration: 9s;
+}
+
+.circles li:nth-child(5) {
+	left: 65%;
+	width: 20px;
+	height: 20px;
+	animation-delay: 0s;
+}
+
+.circles li:nth-child(6) {
+	left: 75%;
+	width: 110px;
+	height: 110px;
+	animation-delay: 3s;
+}
+
+.circles li:nth-child(7) {
+	left: 35%;
+	width: 150px;
+	height: 150px;
+	animation-delay: 7s;
+}
+
+.circles li:nth-child(8) {
+	left: 50%;
+	width: 25px;
+	height: 25px;
+	animation-delay: 15s;
+	animation-duration: 45s;
+}
+
+.circles li:nth-child(9) {
+	left: 20%;
+	width: 15px;
+	height: 15px;
+	animation-delay: 2s;
+	animation-duration: 8s;
+}
+
+.circles li:nth-child(10) {
+	left: 85%;
+	width: 150px;
+	height: 150px;
+	animation-delay: 0s;
+	animation-duration: 6s;
+}
+
+@keyframes animate {
+	0% {
+		transform: translateY(0) rotate(0deg);
+		opacity: 1;
+		border-radius: 0;
+		font-size: 49pt;
+		color: #676888;
+	}
+
+	100% {
+		transform: translateY(-1000px) rotate(720deg);
+		opacity: 0.2;
+		border-radius: 50%;
+		font-size: 6pt;
+		color: #d3d3e5;
+	}
+}

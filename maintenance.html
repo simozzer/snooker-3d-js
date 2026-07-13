@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- auto-retry: as soon as sign-in is back, a refresh lands the user on the real page -->
+<meta http-equiv="refresh" content="20">
+<title>Sign-in maintenance · Games Compendium</title>
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+    background: radial-gradient(1200px 800px at 50% -10%, #16324a 0%, #0c1622 55%, #070d15 100%);
+    color: #e8eef6;
+  }
+  .card {
+    max-width: 34rem; width: 100%; text-align: center;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 18px; padding: 2.4rem 2rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  }
+  .badge { font-size: 3rem; line-height: 1; }
+  h1 { font-size: 1.5rem; margin: 1rem 0 0.5rem; font-weight: 650; }
+  p { margin: 0.5rem 0; color: #b3c2d4; line-height: 1.55; }
+  .spinner {
+    width: 34px; height: 34px; margin: 1.4rem auto 0.4rem;
+    border: 3px solid rgba(255,255,255,0.15); border-top-color: #4aa3ff;
+    border-radius: 50%; animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .muted { font-size: 0.85rem; color: #7d8da0; margin-top: 1.2rem; }
+  a { color: #6cb6ff; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="badge">🛠️</div>
+    <h1>Sign-in is briefly under maintenance</h1>
+    <p>The account service is being worked on right now. You can still play the free
+       offline and hot-seat games — only signing in and online play are paused.</p>
+    <div class="spinner" aria-hidden="true"></div>
+    <p class="muted">This page checks again automatically every&nbsp;20&nbsp;seconds —
+       you'll be sent through as soon as sign-in is back. Or <a href="/">return to the games</a>.</p>
+  </main>
+</body>
+</html>

@@ -125,3 +125,16 @@ test('Klondike deals 28 tableau cards and dealing the stock puts a card on the w
   await evaluate(`document.getElementById('collect').click()`);
   assert.deepEqual(jsErrors, [], `console errors after deal/undo/collect:\n${jsErrors.join('\n')}`);
 });
+
+test('Pétanque boots, a throw runs the gravel physics and settles cleanly', async (t) => {
+  if (!available) { t.skip(skipReason || 'browser unavailable'); return; }
+  assert.ok(await open('web/games/petanque/index.html', `!!document.getElementById('piste') && !!document.getElementById('status')`), 'canvas did not render');
+  assert.deepEqual(jsErrors, [], `console errors on load:\n${jsErrors.join('\n')}`);
+
+  // It's your throw on load — click the piste to lob a boule toward the jack.
+  await evaluate(`(()=>{ const c=document.getElementById('piste'); const r=c.getBoundingClientRect(); c.dispatchEvent(new MouseEvent('click',{clientX:r.left+r.width*0.5, clientY:r.top+r.height*0.4, bubbles:true})); })()`);
+  assert.ok(await waitFor(`document.querySelectorAll('#dots-you .bd.spent').length >= 1`, { timeout: 6000 }), 'the throw did not register (no spent boule)');
+
+  await sleep(2500); // fly → land → roll → settle, and let the AI reply
+  assert.deepEqual(jsErrors, [], `console errors after a throw:\n${jsErrors.join('\n')}`);
+});

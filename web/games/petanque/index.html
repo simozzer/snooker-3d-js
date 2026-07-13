@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pétanque</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%E2%9A%AA</text></svg>" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #12161b; color: #e8e8e8; display: flex; flex-direction: column; align-items: center; }
+    a { color: #7fb0d8; }
+    #chrome { position: fixed; top: 8px; left: 10px; z-index: 50; display: flex; gap: 10px; align-items: center; font: 600 12px/1 system-ui, sans-serif; }
+    #chrome a { color: #cfe0ee; text-decoration: none; background: #1b2229; border: 1px solid #2a333d; border-radius: 8px; padding: 5px 10px; }
+    #chrome a:hover { border-color: #3f5568; }
+    #build { color: #6f8496; }
+
+    header { text-align: center; margin: 50px 16px 4px; }
+    h1 { font-size: 24px; margin: 0; letter-spacing: .5px; }
+    h1 .accent { color: #54c98a; }
+    .sub { font-size: 12.5px; color: #9fb4c7; margin: 4px 0 0; }
+
+    .hud { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; margin: 12px 8px 8px; max-width: 900px; }
+    .stat { background: #1b2229; border: 1px solid #2a333d; border-radius: 10px; padding: 7px 12px; font-size: 13px; color: #cfe0ee; display: flex; gap: 8px; align-items: center; }
+    .stat b { color: #fff; font-size: 15px; }
+    .dotrow { display: inline-flex; gap: 3px; }
+    .bd { width: 10px; height: 10px; border-radius: 50%; }
+    .bd.you { background: radial-gradient(circle at 35% 30%, #cfe4ff, #4f7fd8 70%); }
+    .bd.opp { background: radial-gradient(circle at 35% 30%, #ffd6c9, #d8694f 70%); }
+    .bd.spent { opacity: .22; }
+    label.slider { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9fb4c7; }
+    input[type=range] { width: 130px; accent-color: #54c98a; }
+    button { font: 600 13px system-ui, sans-serif; padding: 8px 13px; border: 0; border-radius: 9px; cursor: pointer; background: #2e7d5b; color: #fff; }
+    button.sec { background: #33404c; color: #cfe0ee; }
+    button.toggle.active { background: #ffd45b; color: #23331b; }
+    button:hover { filter: brightness(1.08); }
+
+    #wrap { position: relative; width: min(94vw, 900px); }
+    canvas { width: 100%; height: auto; display: block; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.5); touch-action: none; }
+    #status { min-height: 22px; margin: 8px 0 4px; font-size: 15px; font-weight: 700; text-align: center; color: #ffcf5b; }
+    #status.win { color: #54c98a; }
+    footer { margin: 6px 0 30px; font-size: 12px; color: #6f8496; text-align: center; max-width: 620px; padding: 0 16px; }
+  </style>
+</head>
+<body>
+  <div id="chrome"><a href="../../../index.html">← All games</a><span id="build">Pétanque</span></div>
+
+  <header>
+    <h1>Pé<span class="accent">tanque</span></h1>
+    <p class="sub">Throw your boules closest to the little jack — on a rough gravel piste that never plays quite fair.</p>
+  </header>
+
+  <div class="hud">
+    <div class="stat">You <b id="score-you">0</b><span class="dotrow" id="dots-you"></span></div>
+    <div class="stat"><span class="dotrow" id="dots-opp"></span><b id="score-opp">0</b> Comp</div>
+    <label class="slider">Lob <input id="style" type="range" min="0" max="100" value="45"> Roll</label>
+    <button id="mode" class="toggle">vs Computer</button>
+    <button id="measure" class="sec">Measure</button>
+    <button id="newgame">New game</button>
+  </div>
+
+  <div id="wrap"><canvas id="piste" width="900" height="560"></canvas></div>
+  <div id="status"></div>
+
+  <footer>Move the mouse over the piste to place your landing spot, then click to throw. The <b>Lob → Roll</b> slider sets how far the boule runs after it lands. Closest boule to the jack wins the end; first to 13 wins. A boule off the piste is dead.</footer>
+
+  <script type="module" src="./petanque.js"></script>
+</body>
+</html>

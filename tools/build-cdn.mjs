@@ -11,7 +11,7 @@
 //   • writes a Cloudflare _headers file with sensible security headers (CSP, nosniff, frame-ancestors …).
 // The result is safe to publish: view-source reveals no host, no realm, no tailnet name — just games.
 
-import { rm, mkdir, cp, writeFile, readdir, stat } from 'node:fs/promises';
+import { rm, mkdir, cp, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -53,6 +53,22 @@ for (const rel of DROP) {
 }
 await writeFile(join(DIST, 'web', 'config.local.js'), OFFLINE_CONFIG);
 await writeFile(join(DIST, '_headers'), HEADERS);
+
+// Cloudflare Pages caps files at 25 MiB, and the Sidoku puzzle banks are huge (one puzzle per line —
+// hundreds of thousands of them). Trim each to a generous line-boundary sample so the CDN build fits
+// and stays lean; the full banks remain on the origin server. 4 MiB is still tens of thousands of puzzles.
+const PUZZLE_CAP = 4 * 1024 * 1024;
+const resDir = join(DIST, 'web', 'games', 'sidoku', 'resources');
+for (const f of await readdir(resDir)) {
+  if (!f.endsWith('.txt')) continue;
+  const p = join(resDir, f);
+  const buf = await readFile(p);
+  if (buf.length <= PUZZLE_CAP) continue;
+  let cut = buf.lastIndexOf(0x0a, PUZZLE_CAP); // keep whole lines only (don't split a puzzle)
+  if (cut < 0) cut = PUZZLE_CAP;
+  await writeFile(p, buf.subarray(0, cut + 1));
+  console.log(`trimmed ${f}: ${(buf.length / 1048576).toFixed(1)} MiB -> ${((cut + 1) / 1048576).toFixed(1)} MiB`);
+}
 
 // Count what we shipped, and hard-fail if anything internal slipped in.
 async function walk(dir) {

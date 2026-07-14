@@ -131,8 +131,16 @@ test('Pétanque boots, a throw runs the gravel physics and settles cleanly', asy
   assert.ok(await open('web/games/petanque/index.html', `!!document.getElementById('piste') && !!document.getElementById('status')`), 'canvas did not render');
   assert.deepEqual(jsErrors, [], `console errors on load:\n${jsErrors.join('\n')}`);
 
-  // It's your throw on load — click the piste to lob a boule toward the jack.
-  await evaluate(`(()=>{ const c=document.getElementById('piste'); const r=c.getBoundingClientRect(); c.dispatchEvent(new MouseEvent('click',{clientX:r.left+r.width*0.5, clientY:r.top+r.height*0.4, bubbles:true})); })()`);
+  // It's your throw on load — DRAG out from the throwing circle (drag direction = line, length = power).
+  await evaluate(`(()=>{
+    const c=document.getElementById('piste'); const r=c.getBoundingClientRect();
+    const cx=r.left+r.width*0.5, cy=r.top+r.height*0.907;   // throwing circle (bottom-centre)
+    const tx=r.left+r.width*0.5, ty=r.top+r.height*0.40;    // pull well up the piste = strong throw
+    const p={bubbles:true, pointerId:1, pointerType:'mouse'};
+    c.dispatchEvent(new PointerEvent('pointerdown',{clientX:cx, clientY:cy, ...p}));
+    c.dispatchEvent(new PointerEvent('pointermove',{clientX:tx, clientY:ty, ...p}));
+    c.dispatchEvent(new PointerEvent('pointerup',  {clientX:tx, clientY:ty, ...p}));
+  })()`);
   assert.ok(await waitFor(`document.querySelectorAll('#dots-you .bd.spent').length >= 1`, { timeout: 6000 }), 'the throw did not register (no spent boule)');
 
   await sleep(2500); // fly → land → roll → settle, and let the AI reply

@@ -1,0 +1,441 @@
+// petanque-gl.js — a hand-rolled WebGL2 renderer for the pétanque piste. Zero dependencies: the matrix
+// math, meshes, textures, lighting and the L.S.-Lowry crowd of matchstick figures are all built here from
+// scratch. The GAME (physics, turns, AI) lives in petanque.js and stays in 2D "plan" coordinates
+// (x:0..W, y:0..H); this module only draws that state in 3D and turns pointer rays back into plan coords.
+//
+// World mapping: plan (x,y) → 3D (X = x - W/2, Y = up, Z = y - H/2). Ground is the plane Y=0. The camera
+// sits behind the near edge (the throwing circle) and looks across the piste toward the jack and the crowd.
+
+// ---- tiny mat4 / vec3 (column-major, WebGL order) --------------------------------------------------
+const V = {
+  sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; },
+};
+const M = {
+  mul(a, b) {
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+      let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+      o[c * 4 + r] = s;
+    }
+    return o;
+  },
+  perspective(fovy, aspect, near, far) {
+    const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);
+  },
+  lookAt(eye, ctr, up) {
+    const z = V.norm(V.sub(eye, ctr)), x = V.norm(V.cross(up, z)), y = V.cross(z, x);
+    return new Float32Array([
+      x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
+      -(x[0] * eye[0] + x[1] * eye[1] + x[2] * eye[2]),
+      -(y[0] * eye[0] + y[1] * eye[1] + y[2] * eye[2]),
+      -(z[0] * eye[0] + z[1] * eye[1] + z[2] * eye[2]), 1,
+    ]);
+  },
+  model(tx, ty, tz, s) {  // translate + uniform scale
+    return new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, tx, ty, tz, 1]);
+  },
+  invert(m) {
+    const a = m, o = new Float32Array(16);
+    const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3], a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+    const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11], a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+    const b00 = a00 * a11 - a01 * a10, b01 = a00 * a12 - a02 * a10, b02 = a00 * a13 - a03 * a10;
+    const b03 = a01 * a12 - a02 * a11, b04 = a01 * a13 - a03 * a11, b05 = a02 * a13 - a03 * a12;
+    const b06 = a20 * a31 - a21 * a30, b07 = a20 * a32 - a22 * a30, b08 = a20 * a33 - a23 * a30;
+    const b09 = a21 * a32 - a22 * a31, b10 = a21 * a33 - a23 * a31, b11 = a22 * a33 - a23 * a32;
+    let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+    if (!det) return o; det = 1 / det;
+    o[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det; o[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
+    o[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det; o[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
+    o[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det; o[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
+    o[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det; o[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
+    o[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det; o[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
+    o[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det; o[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
+    o[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det; o[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
+    o[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det; o[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
+    return o;
+  },
+  // project a world point through viewProj → clip → returns {x,y (NDC -1..1), w}
+  project(vp, p) {
+    const x = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
+    const y = vp[1] * p[0] + vp[5] * p[1] + vp[9] * p[2] + vp[13];
+    const w = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+    return { x: x / w, y: y / w, w };
+  },
+};
+
+// ---- GL helpers ------------------------------------------------------------------------------------
+function sh(gl, type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) + '\n' + src);
+  return s;
+}
+function prog(gl, vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl, gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl, gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+function tex(gl, src) {
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  return t;
+}
+
+// ---- procedural canvases (textures) ----------------------------------------------------------------
+function cvs(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+
+function gravelTex() {
+  const c = cvs(512, 512), g = c.getContext('2d');
+  g.fillStyle = '#b49566'; g.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 14000; i++) {
+    const x = Math.random() * 512, y = Math.random() * 512, s = Math.random() * 3 + 0.5, t = Math.random();
+    g.fillStyle = t < 0.5 ? 'rgba(84,66,40,.4)' : t < 0.8 ? 'rgba(150,126,90,.5)' : 'rgba(230,214,182,.55)';
+    g.beginPath(); g.arc(x, y, s, 0, 7); g.fill();
+  }
+  return c;
+}
+function softDisc(col = '0,0,0') {
+  const c = cvs(128, 128), g = c.getContext('2d'), grd = g.createRadialGradient(64, 64, 2, 64, 64, 62);
+  grd.addColorStop(0, `rgba(${col},0.9)`); grd.addColorStop(0.6, `rgba(${col},0.5)`); grd.addColorStop(1, `rgba(${col},0)`);
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 128); return c;
+}
+function smokeTex() {
+  const c = cvs(64, 64), g = c.getContext('2d'), grd = g.createRadialGradient(32, 32, 1, 32, 32, 31);
+  grd.addColorStop(0, 'rgba(225,225,225,0.55)'); grd.addColorStop(0.5, 'rgba(210,210,210,0.28)'); grd.addColorStop(1, 'rgba(200,200,200,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 64, 64); return c;
+}
+
+// A distant backdrop: soft plane-trees + a low stone wall, transparent above so the sky shows through.
+function backdropTex() {
+  const c = cvs(1024, 256), g = c.getContext('2d');
+  g.clearRect(0, 0, 1024, 256);
+  // plane-tree canopy blobs
+  for (let i = 0; i < 60; i++) {
+    const x = Math.random() * 1024, y = 60 + Math.random() * 70, r = 26 + Math.random() * 46;
+    const t = Math.random(); g.fillStyle = t < 0.5 ? '#4f6a42' : t < 0.8 ? '#5f7a4e' : '#42563a';
+    g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+  }
+  // trunks
+  g.fillStyle = '#5a4b3a'; for (let i = 0; i < 12; i++) { const x = 40 + i * 86 + (Math.random() - 0.5) * 30; g.fillRect(x, 120, 7, 70); }
+  // low stone wall
+  g.fillStyle = '#9a8f7d'; g.fillRect(0, 176, 1024, 44);
+  g.fillStyle = 'rgba(60,52,40,.35)'; for (let i = 0; i < 1024; i += 34) g.fillRect(i, 176, 2, 44);
+  for (let y = 176; y < 220; y += 15) { g.fillRect(0, y, 1024, 2); }
+  return c;
+}
+
+// One L.S.-Lowry matchstick figure: flat, dark, spindly, in a muted northern palette. `raise` (0..1) lifts
+// the working hand to the mouth (smoke/drink/eat) or the brow (watch). Drawn facing the viewer.
+function lowryFrame(opts) {
+  const w = 96, h = 200, c = cvs(w, h), g = c.getContext('2d');
+  const { coat, hat, action, raise = 0, watch = false, prop = coat } = opts;
+  const cx = w / 2, feet = h - 6, hip = h * 0.56, sh0 = h * 0.30, head = h * 0.20, hr = 12;
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  // legs
+  g.strokeStyle = '#1c1c22'; g.lineWidth = 6;
+  g.beginPath(); g.moveTo(cx - 5, hip); g.lineTo(cx - 8, feet); g.moveTo(cx + 5, hip); g.lineTo(cx + 9, feet); g.stroke();
+  // coat (tapered body)
+  g.fillStyle = coat; g.beginPath();
+  g.moveTo(cx - 12, sh0); g.lineTo(cx + 12, sh0); g.lineTo(cx + 9, hip + 6); g.lineTo(cx - 9, hip + 6); g.closePath(); g.fill();
+  // far arm (behind), resting
+  g.strokeStyle = coat; g.lineWidth = 6;
+  g.beginPath(); g.moveTo(cx - 10, sh0 + 4); g.lineTo(cx - 15, hip - 6); g.stroke();
+  // working arm — elbow at shoulder, hand interpolates from hip to mouth/brow
+  const mouth = watch ? [cx + 8, head - 2] : [cx + 4, head + hr - 2];
+  const rest = [cx + 15, hip - 4];
+  const hx = rest[0] + (mouth[0] - rest[0]) * raise, hy = rest[1] + (mouth[1] - rest[1]) * raise;
+  const elbow = [cx + 13, sh0 + 20];
+  g.strokeStyle = coat; g.lineWidth = 6;
+  g.beginPath(); g.moveTo(cx + 10, sh0 + 4); g.lineTo(elbow[0], elbow[1]); g.lineTo(hx, hy); g.stroke();
+  // hand prop
+  if (action === 'drink' && raise > 0.15) { g.fillStyle = '#c9b48c'; g.fillRect(hx - 4, hy - 6, 8, 10); }
+  if (action === 'eat' && raise > 0.2) { g.fillStyle = '#e8dcc0'; g.beginPath(); g.arc(hx, hy, 3.5, 0, 7); g.fill(); }
+  if (action === 'smoke' && raise > 0.3) {
+    g.strokeStyle = '#eee'; g.lineWidth = 2; g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx + 5, hy - 4); g.stroke();
+    g.fillStyle = '#ff7043'; g.beginPath(); g.arc(hx + 6, hy - 5, 1.6, 0, 7); g.fill();
+  }
+  // head + face
+  g.fillStyle = '#e7c5a0'; g.beginPath(); g.arc(cx, head, hr, 0, 7); g.fill();
+  // hat
+  g.fillStyle = hat;
+  if (hat) { g.beginPath(); g.ellipse(cx, head - hr + 4, hr + 3, 5, 0, 0, 7); g.fill(); g.fillRect(cx - hr + 1, head - hr - 4, 2 * hr - 2, 8); }
+  // a dab of colour on some — scarf
+  if (prop && Math.random < 0) {/* noop, keep deterministic */}
+  return c;
+}
+
+// ---- the renderer ----------------------------------------------------------------------------------
+export function createPetanqueRenderer(glCanvas, overlay, opts) {
+  const { W, H, P, THROW, R, JACK_R, TEAM } = opts;
+  const gl = glCanvas.getContext('webgl2', { antialias: true, alpha: false, preserveDrawingBuffer: true });
+  if (!gl) throw new Error('WebGL2 unavailable');
+  const octx = overlay.getContext('2d');
+
+  // programs
+  const litVS = `#version 300 es
+    layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNormal; layout(location=2) in vec2 aUV;
+    uniform mat4 uViewProj, uModel; out vec3 vN, vW; out vec2 vUV;
+    void main(){ vec4 w=uModel*vec4(aPos,1.0); vW=w.xyz; vN=normalize(mat3(uModel)*aNormal); vUV=aUV; gl_Position=uViewProj*w; }`;
+  const litFS = `#version 300 es
+    precision highp float; in vec3 vN, vW; in vec2 vUV; out vec4 frag;
+    uniform vec3 uLightDir, uCam, uColor; uniform sampler2D uTex;
+    uniform float uUseTex, uSpec, uAmb, uAlpha, uUVScale;
+    void main(){
+      vec3 N=normalize(vN), L=normalize(-uLightDir);
+      float diff=max(dot(N,L),0.0);
+      vec3 base=mix(uColor, texture(uTex, vUV*uUVScale).rgb, uUseTex);
+      vec3 col=base*(uAmb+(1.0-uAmb)*diff);
+      if(uSpec>0.0){ vec3 Vv=normalize(uCam-vW), Hh=normalize(L+Vv);
+        col+=vec3(1.0)*pow(max(dot(N,Hh),0.0),42.0)*uSpec;
+        col+=base*pow(1.0-max(dot(N,Vv),0.0),3.0)*0.22; }
+      frag=vec4(col,uAlpha);
+    }`;
+  const bbVS = `#version 300 es
+    layout(location=0) in vec2 aCorner; uniform mat4 uViewProj;
+    uniform vec3 uCenter,uRight,uUp; uniform vec2 uSize; out vec2 vUV;
+    void main(){ vUV=vec2(aCorner.x+0.5, 0.5-aCorner.y);
+      vec3 wp=uCenter+aCorner.x*uSize.x*uRight+aCorner.y*uSize.y*uUp; gl_Position=uViewProj*vec4(wp,1.0); }`;
+  const bbFS = `#version 300 es
+    precision highp float; in vec2 vUV; out vec4 frag; uniform sampler2D uTex; uniform float uAlpha; uniform vec3 uTint;
+    void main(){ vec4 t=texture(uTex,vUV); frag=vec4(t.rgb*uTint, t.a*uAlpha); }`;
+  const skyVS = `#version 300 es
+    layout(location=0) in vec2 aPos; out vec2 vUV; void main(){ vUV=aPos*0.5+0.5; gl_Position=vec4(aPos,0.999,1.0); }`;
+  const skyFS = `#version 300 es
+    precision highp float; in vec2 vUV; out vec4 frag; uniform vec3 uTop,uBot;
+    void main(){ frag=vec4(mix(uBot,uTop,pow(vUV.y,0.7)),1.0); }`;
+
+  const litP = prog(gl, litVS, litFS), bbP = prog(gl, bbVS, bbFS), skyP = prog(gl, skyVS, skyFS);
+  const U = (p, names) => { const o = {}; for (const n of names) o[n] = gl.getUniformLocation(p, n); return o; };
+  const litU = U(litP, ['uViewProj', 'uModel', 'uLightDir', 'uCam', 'uColor', 'uTex', 'uUseTex', 'uSpec', 'uAmb', 'uAlpha', 'uUVScale']);
+  const bbU = U(bbP, ['uViewProj', 'uCenter', 'uRight', 'uUp', 'uSize', 'uTex', 'uAlpha', 'uTint']);
+  const skyU = U(skyP, ['uTop', 'uBot']);
+
+  // meshes
+  function vao(setup) { const a = gl.createVertexArray(); gl.bindVertexArray(a); setup(); gl.bindVertexArray(null); return a; }
+  function buf(loc, data, size) {
+    const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+  }
+  // sphere
+  const SP = (() => {
+    const pos = [], nor = [], uv = [], idx = [], la = 20, lo = 28;
+    for (let i = 0; i <= la; i++) { const th = i / la * Math.PI, st = Math.sin(th), ct = Math.cos(th);
+      for (let j = 0; j <= lo; j++) { const ph = j / lo * 2 * Math.PI, sp = Math.sin(ph), cp = Math.cos(ph);
+        const x = st * cp, y = ct, z = st * sp; pos.push(x, y, z); nor.push(x, y, z); uv.push(j / lo, i / la); } }
+    for (let i = 0; i < la; i++) for (let j = 0; j < lo; j++) { const a = i * (lo + 1) + j, b = a + lo + 1;
+      idx.push(a, b, a + 1, b, b + 1, a + 1); }
+    const va = vao(() => { buf(0, pos, 3); buf(1, nor, 3); buf(2, uv, 2);
+      const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW); });
+    return { va, n: idx.length };
+  })();
+  // ground plane (XZ), big, uv for tiling
+  const GROUND = (() => {
+    const gw = W * 1.6, gd = H * 2.2, z1 = -H * 1.4, z2 = H * 0.9;
+    const pos = [-gw, 0, z1, gw, 0, z1, gw, 0, z2, -gw, 0, z1, gw, 0, z2, -gw, 0, z2];
+    const nor = [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0];
+    const uv = [0, 0, 6, 0, 6, 9, 0, 0, 6, 9, 0, 9];
+    return vao(() => { buf(0, pos, 3); buf(1, nor, 3); buf(2, uv, 2); });
+  })();
+  const QUAD = vao(() => buf(0, [-0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5], 2)); // corners
+  const FS = vao(() => buf(0, [-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1], 2)); // fullscreen
+
+  // textures
+  const T = {
+    gravel: tex(gl, gravelTex()), shadow: tex(gl, softDisc('30,24,14')), smoke: tex(gl, smokeTex()),
+    backdrop: tex(gl, backdropTex()),
+  };
+
+  // ---- the crowd -----------------------------------------------------------------------------------
+  const ACTIONS = ['smoke', 'drink', 'eat', 'chat'];
+  const COATS = ['#2a2f3a', '#3a2f28', '#33383f', '#2c3a30', '#3f2f33', '#26303c'];
+  const HATS = ['#15161b', '#20222a', '#2a1f18', ''];
+  const RAISE = [0, 0.35, 0.7, 1, 1, 0.7, 0.35, 0]; // hand up-hold-down over 8 frames
+  const crowd = [];
+  (function buildCrowd() {
+    // a loose knot of folk beyond the far edge — scattered over two rough rows, mostly smoking & drinking
+    const n = 12, farZ = -H / 2 - 26;
+    const bag = ['smoke', 'smoke', 'smoke', 'drink', 'drink', 'eat', 'chat', 'chat'];
+    for (let i = 0; i < n; i++) {
+      const action = bag[(Math.random() * bag.length) | 0];
+      const coat = COATS[(Math.random() * COATS.length) | 0], hat = HATS[(Math.random() * HATS.length) | 0];
+      const x = (Math.random() - 0.5) * 680;
+      const z = farZ - (i % 2) * 66 - Math.random() * 46;   // two loose depth bands
+      const scale = 126 + Math.random() * 32;
+      // precompute 8 action frames + 1 watch frame, as textures
+      const frames = RAISE.map((r) => tex(gl, lowryFrame({ coat, hat, action, raise: action === 'chat' ? 0.1 + 0.12 * r : r })));
+      const watchTex = tex(gl, lowryFrame({ coat, hat, action, raise: 0.9, watch: true }));
+      crowd.push({ x, z, action, scale, frames, watchTex, phase: Math.random(), speed: 0.1 + Math.random() * 0.16,
+        watch: 0, puff: Math.random() * 1.5, wob: Math.random() * 6 });
+    }
+    crowd.sort((a, b) => a.z - b.z); // back-to-front for alpha
+  })();
+  const puffs = [];
+  function react() { // called on a throw / a settle: a few heads turn to the game for a spell
+    for (const f of crowd) if (Math.random() < 0.6) f.watch = 1.6 + Math.random() * 1.8;
+  }
+
+  // ---- camera --------------------------------------------------------------------------------------
+  let vp = M.perspective(1, 1, 1, 1), camPos = [0, 300, 470], t = 0;
+  function updateCamera(dt) {
+    t += dt;
+    const sway = Math.sin(t * 0.12) * 26;
+    camPos = [sway, 292 + Math.sin(t * 0.09) * 8, 486];
+    const proj = M.perspective(40 * Math.PI / 180, glCanvas.width / glCanvas.height, 1, 4000);
+    const view = M.lookAt(camPos, [0, 18, -30], [0, 1, 0]);
+    vp = M.mul(proj, view);
+  }
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const r = glCanvas.getBoundingClientRect();
+    const w = Math.max(2, Math.round(r.width * dpr)), h = Math.max(2, Math.round(r.height * dpr));
+    if (glCanvas.width !== w || glCanvas.height !== h) { glCanvas.width = w; glCanvas.height = h; }
+    overlay.width = w; overlay.height = h; overlay.style.width = r.width + 'px'; overlay.style.height = r.height + 'px';
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { r, dpr };
+  }
+
+  // world helpers ------------------------------------------------------------------------------------
+  const toWorld = (x, y, h = 0) => [x - W / 2, h, y - H / 2];
+  function screenToGround(clientX, clientY) {
+    const r = glCanvas.getBoundingClientRect();
+    const nx = (clientX - r.left) / r.width * 2 - 1, ny = 1 - (clientY - r.top) / r.height * 2;
+    const inv = M.invert(vp);
+    const near = mulPt(inv, [nx, ny, -1]), far = mulPt(inv, [nx, ny, 1]);
+    const dir = V.sub(far, near); const t2 = -near[1] / dir[1];
+    const hit = [near[0] + dir[0] * t2, 0, near[2] + dir[2] * t2];
+    return { x: hit[0] + W / 2, y: hit[2] + H / 2 };
+  }
+  function mulPt(m, p) { // full perspective divide
+    const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+    const z = m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14], w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+    return [x / w, y / w, z / w];
+  }
+  function worldToScreen(x, y, h, r, dpr) { // → CSS px in overlay space
+    const p = M.project(vp, toWorld(x, y, h));
+    return { x: (p.x * 0.5 + 0.5) * r.width, y: (1 - (p.y * 0.5 + 0.5)) * r.height, w: p.w };
+  }
+
+  // ---- draw ----------------------------------------------------------------------------------------
+  function drawMesh(va, n, model, { color = [1, 1, 1], useTex = 0, texId = null, spec = 0, amb = 0.5, alpha = 1, uv = 1 }) {
+    gl.useProgram(litP);
+    gl.uniformMatrix4fv(litU.uViewProj, false, vp); gl.uniformMatrix4fv(litU.uModel, false, model);
+    gl.uniform3fv(litU.uLightDir, [-0.35, -1, -0.35]); gl.uniform3fv(litU.uCam, camPos);
+    gl.uniform3fv(litU.uColor, color); gl.uniform1f(litU.uUseTex, useTex); gl.uniform1f(litU.uSpec, spec);
+    gl.uniform1f(litU.uAmb, amb); gl.uniform1f(litU.uAlpha, alpha); gl.uniform1f(litU.uUVScale, uv);
+    if (texId) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texId); gl.uniform1i(litU.uTex, 0); }
+    gl.bindVertexArray(va);
+    if (n) gl.drawElements(gl.TRIANGLES, n, gl.UNSIGNED_SHORT, 0); else gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindVertexArray(null);
+  }
+  function drawBillboard(texId, center, size, { up, right, tint = [1, 1, 1], alpha = 1 }) {
+    gl.useProgram(bbP);
+    gl.uniformMatrix4fv(bbU.uViewProj, false, vp);
+    gl.uniform3fv(bbU.uCenter, center); gl.uniform3fv(bbU.uUp, up); gl.uniform3fv(bbU.uRight, right);
+    gl.uniform2fv(bbU.uSize, size); gl.uniform3fv(bbU.uTint, tint); gl.uniform1f(bbU.uAlpha, alpha);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texId); gl.uniform1i(bbU.uTex, 0);
+    gl.bindVertexArray(QUAD); gl.drawArrays(gl.TRIANGLES, 0, 6); gl.bindVertexArray(null);
+  }
+
+  function frame(state, dt) {
+    const { r, dpr } = resize();
+    updateCamera(dt);
+    gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+    gl.clearColor(0.55, 0.68, 0.78, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BIT || gl.DEPTH_BUFFER_BIT);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // sky (behind everything)
+    gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
+    gl.useProgram(skyP); gl.uniform3fv(skyU.uTop, [0.42, 0.6, 0.78]); gl.uniform3fv(skyU.uBot, [0.86, 0.86, 0.8]);
+    gl.bindVertexArray(FS); gl.drawArrays(gl.TRIANGLES, 0, 6); gl.bindVertexArray(null);
+    gl.depthMask(true); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
+
+    // ground
+    drawMesh(GROUND, 0, M.model(0, 0, 0, 1), { useTex: 1, texId: T.gravel, amb: 0.62, uv: 1 });
+
+    // camera basis for billboards
+    const fwd = V.norm(V.sub([0, 18, -30], camPos));
+    const right = V.norm(V.cross([0, 1, 0], fwd));
+    const camUp = V.cross(fwd, right);
+
+    // distant backdrop (trees + wall), standing at the far edge
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+    drawBillboard(T.backdrop, [0, 96, -H * 1.15], [W * 3.0, 240], { up: [0, 1, 0], right: [1, 0, 0], alpha: 1 });
+    gl.depthMask(true);
+
+    // shadows (flat discs on the gravel), then spheres
+    const balls = [state.jack, ...state.bodies];
+    gl.depthMask(false);
+    for (const b of balls) {
+      if (b.dead) continue;
+      const lift = b === state.jack ? 0 : (b.airLift || 0);
+      const sc = (b.r * 2.3) * (1 + lift / 120), a = b.dead ? 0.1 : Math.max(0.12, 0.4 - lift / 400);
+      drawBillboard(T.shadow, toWorld(b.x, b.y, 0.6), [sc, sc], { up: [0, 0, 1], right: [1, 0, 0], alpha: a, tint: [1, 1, 1] });
+    }
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+    for (const b of balls) {
+      const lift = b === state.jack ? 0 : (b.airLift || 0);
+      const col = b === state.jack ? [0.86, 0.74, 0.42] : hex(TEAM[b.team].fill[1]);
+      const spec = b === state.jack ? 0.15 : 0.9, amb = b === state.jack ? 0.55 : 0.32;
+      drawMesh(SP.va, SP.n, M.model(...toWorld(b.x, b.y, b.r + lift), b.r), { color: col, spec, amb, alpha: b.dead ? 0.3 : 1 });
+    }
+
+    // crowd + smoke (alpha, back-to-front; depth test on so boules can occlude)
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+    const rgt = V.norm([right[0], 0, right[2]]); // upright (cylindrical) billboard axis
+    for (const f of crowd) {
+      f.phase = (f.phase + dt * f.speed) % 1;
+      if (f.watch > 0) f.watch -= dt;
+      const idle = Math.sin((f.phase + f.wob) * 6.28) * 3;
+      const texId = f.watch > 0 ? f.watchTex : f.frames[(f.phase * f.frames.length) | 0];
+      const cx = f.x, cz = f.z, hgt = f.scale;
+      // a soft ground shadow so they read as standing on the gravel, not pasted on
+      drawBillboard(T.shadow, [cx, 0.7, cz], [hgt * 0.34, hgt * 0.34], { up: [0, 0, 1], right: [1, 0, 0], alpha: 0.3 });
+      drawBillboard(texId, [cx, hgt / 2 + idle, cz], [hgt * 0.48, hgt], { up: [0, 1, 0], right: rgt, alpha: 1 });
+      // smokers puff
+      if (f.action === 'smoke') { f.puff -= dt; if (f.puff <= 0) { f.puff = 0.4 + Math.random() * 0.5;
+        puffs.push({ x: cx + 4, y: hgt * 0.84, z: cz, life: 0, max: 2.8, r0: 8 }); } }
+    }
+    // puffs rise + spread + fade
+    for (let i = puffs.length - 1; i >= 0; i--) { const p = puffs[i]; p.life += dt; if (p.life > p.max) { puffs.splice(i, 1); continue; }
+      const k = p.life / p.max, sz = p.r0 + k * 44, a = (1 - k) * 0.6;
+      drawBillboard(T.smoke, [p.x + k * 8, p.y + k * 50, p.z], [sz, sz], { up: camUp, right, alpha: a }); }
+    gl.depthMask(true); gl.disable(gl.BLEND);
+
+    drawOverlay(state, r);
+  }
+
+  // 2D aim overlay (projected from 3D so it sits on the piste) ---------------------------------------
+  function drawOverlay(state, r) {
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    if (!(state.aim && state.aiming && state.humanTurn())) return;
+    const a = state.aim, L = a.landing;
+    const ts = worldToScreen(THROW.x, THROW.y, 0, r), ls = worldToScreen(L.x, L.y, 0, r);
+    octx.strokeStyle = 'rgba(84,201,138,.9)'; octx.setLineDash([6, 7]); octx.lineWidth = 2;
+    octx.beginPath(); octx.moveTo(ts.x, ts.y); octx.lineTo(ls.x, ls.y); octx.stroke(); octx.setLineDash([]);
+    const spread = Math.min(46, a.dist * (0.05 + 0.045) + 8) * (ls.w ? 260 / ls.w : 1);
+    octx.strokeStyle = 'rgba(84,201,138,.4)'; octx.lineWidth = 1.5;
+    octx.beginPath(); octx.ellipse(ls.x, ls.y, spread, spread * 0.5, 0, 0, 7); octx.stroke();
+    octx.beginPath(); octx.arc(ls.x, ls.y, 3, 0, 7); octx.fillStyle = '#54c98a'; octx.fill();
+    const pw = a.power, col = pw < 0.5 ? '#54c98a' : pw < 0.82 ? '#ffd45b' : '#e8663f';
+    octx.strokeStyle = 'rgba(255,255,255,.18)'; octx.lineWidth = 4;
+    octx.beginPath(); octx.arc(ts.x, ts.y, 26, 0, 7); octx.stroke();
+    octx.strokeStyle = col; octx.lineCap = 'round';
+    octx.beginPath(); octx.arc(ts.x, ts.y, 26, -Math.PI / 2, -Math.PI / 2 + pw * 6.28); octx.stroke(); octx.lineCap = 'butt';
+  }
+
+  function hex(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
+
+  resize();
+  return { frame, screenToGround, worldToScreen, react, resize };
+}

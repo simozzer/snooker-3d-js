@@ -1,15 +1,18 @@
-// petanque.js — a top-down pétanque / boules prototype. Pure client-side, no backend. It demonstrates
-// the two things that make boules different from cue sports: you THROW with an arc (an aerial phase that
-// lands and then rolls), and the surface is ROUGH GRAVEL — high friction plus a little random deflection
-// on landing and while rolling, so the terrain never plays quite fair. Closest boule to the jack wins the
-// end; first to 13 wins. Play vs a simple computer or pass-and-play. (Distances in canvas pixels.)
+// petanque.js — pétanque / boules. The GAME (physics, turns, AI) is pure client-side and lives here in 2D
+// "plan" coordinates (x:0..W, y:0..H): you THROW with an arc (an aerial phase that lands and then rolls),
+// and the surface is ROUGH GRAVEL — high friction plus a little random deflection on landing and while
+// rolling, so the terrain never plays quite fair. The RENDERING is real hand-rolled WebGL 3D over in
+// petanque-gl.js (a low camera over the piste, lit steel boules, and a loitering Lowry crowd); this file
+// just feeds it the plan-coordinate state and turns pointer rays back into plan coordinates for aiming.
+// Closest boule to the jack wins the end; first to 13. Play vs a simple computer or pass-and-play.
 
 import { VERSION } from '../../version.js';
+import { createPetanqueRenderer } from './petanque-gl.js';
 
 const cv = document.getElementById('piste');
-const ctx = cv.getContext('2d');
-const W = cv.width, H = cv.height;
+const overlay = document.getElementById('aim');
 const el = (id) => document.getElementById(id);
+const W = 900, H = 560;   // logical "plan" play-field (independent of the WebGL canvas pixel size)
 
 // --- geometry + tuning ------------------------------------------------------------------------------
 const R = 13, JACK_R = 7;                 // boule / jack radii
@@ -22,10 +25,20 @@ const ROUGH = 0.9;                        // gravel character 0..1 (landing kick
 const FLIGHT_MIN = 380, FLIGHT_PER_PX = 0.9; // aerial time in ms
 const PER_TEAM = 3;
 
+// Throw control: you DRAG out from the throwing circle. The drag DIRECTION is your line, and the drag
+// LENGTH is the power (mapped to an aerial landing distance) — NOT the cursor position, so aiming the
+// cursor straight at the jack and pulling hard sails long past it. You judge force and line, never click
+// an exact spot. And no two throws of the same drag land alike (AIM_SPREAD), because a hand isn't a ruler.
+const DRAG_MIN = 16, DRAG_MAX = 205;                  // px of drag → 0..full power
+const DIST_MIN = 80, DIST_MAX = 486;                  // aerial landing distance (px) mapped from power
+const AIM_SPREAD_ANG = 0.045, AIM_SPREAD_DIST = 0.05; // ± line / ± distance a throw can stray by itself
+
 const TEAM = [
   { name: 'you', fill: ['#dcecff', '#5a86dd', '#31509a'] },
   { name: 'opp', fill: ['#ffd9cb', '#d86a4f', '#9a3b2a'] },
 ];
+
+const renderer = createPetanqueRenderer(cv, overlay, { W, H, P, THROW, R, JACK_R, TEAM });
 
 // --- state ------------------------------------------------------------------------------------------
 let jack, bodies, boulesLeft, scores, current, mode, phase, aim, aiTimer, settleTimer;
@@ -69,6 +82,12 @@ function holdingTeam() {
 // --- throwing -------------------------------------------------------------------------------------
 function throwTo(landing, style, team) {
   if (boulesLeft[team] <= 0) return;
+  // A hand is not a ruler: jitter the intended landing (line + distance) before the boule even leaves.
+  // Applies to YOU and the computer alike, so aiming is judgement, not pixel-picking.
+  const a0 = Math.atan2(landing.y - THROW.y, landing.x - THROW.x), d0 = dist(THROW, landing);
+  const a = a0 + (Math.random() - 0.5) * 2 * AIM_SPREAD_ANG;
+  const d = d0 * (1 + (Math.random() - 0.5) * 2 * AIM_SPREAD_DIST);
+  landing = reachable({ x: THROW.x + Math.cos(a) * d, y: THROW.y + Math.sin(a) * d });
   boulesLeft[team] -= 1;
   const b = { x: THROW.x, y: THROW.y, vx: 0, vy: 0, r: R, team, dead: false, state: 'air',
     from: { x: THROW.x, y: THROW.y }, to: { x: landing.x, y: landing.y }, t: 0,
@@ -76,6 +95,7 @@ function throwTo(landing, style, team) {
   bodies.push(b);
   phase = 'sim';
   aim = null;
+  renderer.react(); // heads in the crowd turn to watch the throw
   syncHud();
 }
 
@@ -190,10 +210,6 @@ function maybeAI() {
 }
 
 // --- input (human aim) ----------------------------------------------------------------------------
-function canvasPos(ev) {
-  const r = cv.getBoundingClientRect();
-  return { x: (ev.clientX - r.left) * (W / r.width), y: (ev.clientY - r.top) * (H / r.height) };
-}
 // Clamp a desired landing spot to something actually throwable from the circle.
 function reachable(pt) {
   let x = clamp(pt.x, P.x0 + R, P.x1 - R);
@@ -203,54 +219,36 @@ function reachable(pt) {
   return { x: THROW.x + Math.cos(a) * md, y: THROW.y + Math.sin(a) * md };
 }
 const humanTurn = () => phase === 'aim' && (mode === 'hotseat' || current === 0) && boulesLeft[current] > 0;
-cv.addEventListener('mousemove', (ev) => { if (humanTurn()) aim = reachable(canvasPos(ev)); });
-cv.addEventListener('mouseleave', () => { aim = null; });
-cv.addEventListener('click', (ev) => { if (humanTurn()) throwTo(reachable(canvasPos(ev)), el('style').value / 100, current); });
 
-// --- rendering ------------------------------------------------------------------------------------
-const gravel = document.createElement('canvas'); gravel.width = W; gravel.height = H;
-(function paintGravel() {
-  const g = gravel.getContext('2d');
-  g.fillStyle = '#b79a6e'; g.fillRect(0, 0, W, H);
-  for (let i = 0; i < 5200; i++) {
-    const x = Math.random() * W, y = Math.random() * H, s = Math.random() * 2.1 + 0.4;
-    const t = Math.random(); g.fillStyle = t < 0.5 ? 'rgba(90,72,45,.35)' : (t < 0.8 ? 'rgba(150,128,92,.5)' : 'rgba(233,220,190,.5)');
-    g.beginPath(); g.arc(x, y, s, 0, 7); g.fill();
-  }
-})();
-
-function boule(b, lift = 0) {
-  if (lift > 0) { ctx.save(); ctx.globalAlpha = 0.28; ctx.fillStyle = '#000';
-    ctx.beginPath(); ctx.ellipse(b.x, b.y, b.r * 0.95, b.r * 0.55, 0, 0, 7); ctx.fill(); ctx.restore(); }
-  const y = b.y - lift;
-  const c = b.team === -1 ? ['#fff', '#e7cf8f', '#b89a55'] : TEAM[b.team].fill;
-  const g = ctx.createRadialGradient(b.x - b.r * 0.35, y - b.r * 0.4, b.r * 0.2, b.x, y, b.r);
-  g.addColorStop(0, c[0]); g.addColorStop(0.55, c[1]); g.addColorStop(1, c[2]);
-  ctx.save(); if (b.dead) ctx.globalAlpha = 0.25;
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, y, b.r, 0, 7); ctx.fill();
-  ctx.restore();
+// Turn a pointer position into a throw: DIRECTION from the circle = line; DRAG LENGTH = power → distance.
+function aimFrom(pos) {
+  const dx = pos.x - THROW.x, dy = pos.y - THROW.y;
+  const heading = Math.atan2(dy, dx);
+  const power = clamp((Math.hypot(dx, dy) - DRAG_MIN) / (DRAG_MAX - DRAG_MIN), 0, 1);
+  const d = DIST_MIN + power * (DIST_MAX - DIST_MIN);
+  const landing = reachable({ x: THROW.x + Math.cos(heading) * d, y: THROW.y + Math.sin(heading) * d });
+  return { heading, power, dist: d, landing };
 }
 
-function draw() {
-  ctx.drawImage(gravel, 0, 0);
-  // piste border + throw circle
-  ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 2;
-  ctx.strokeRect(P.x0, P.y0, P.x1 - P.x0, P.y1 - P.y0);
-  ctx.beginPath(); ctx.arc(THROW.x, THROW.y, 22, 0, 7); ctx.stroke();
-
-  // aim guide
-  if (aim && humanTurn()) {
-    ctx.strokeStyle = 'rgba(84,201,138,.8)'; ctx.setLineDash([5, 6]); ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(THROW.x, THROW.y); ctx.lineTo(aim.x, aim.y); ctx.stroke(); ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(aim.x, aim.y, 11, 0, 7); ctx.stroke();
-    ctx.beginPath(); ctx.arc(aim.x, aim.y, 2.5, 0, 7); ctx.fillStyle = '#54c98a'; ctx.fill();
-  }
-
-  boule(jack);
-  for (const b of bodies) boule(b, b.state === 'air' ? Math.sin((b.t / b.flight) * Math.PI) * 46 * (0.5 + b.style) : 0);
+let aiming = false;
+cv.addEventListener('pointerdown', (ev) => {
+  if (!humanTurn()) return;
+  aiming = true; aim = aimFrom(renderer.screenToGround(ev.clientX, ev.clientY));
+  try { cv.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
+});
+cv.addEventListener('pointermove', (ev) => { if (aiming && humanTurn()) aim = aimFrom(renderer.screenToGround(ev.clientX, ev.clientY)); });
+function releaseThrow() {
+  if (!aiming) return;
+  aiming = false;
+  const a = aim; aim = null;
+  if (a && humanTurn() && a.power > 0.02) throwTo(a.landing, el('style').value / 100, current); // too soft = cancel
 }
+cv.addEventListener('pointerup', releaseThrow);
+cv.addEventListener('pointercancel', () => { aiming = false; aim = null; });
 
 // --- loop -----------------------------------------------------------------------------------------
+// Physics still runs in 2D plan coords; the WebGL renderer draws that state in 3D each frame.
+const LIFT = 70; // world-unit height of the aerial arc (scaled by loft)
 let last = 0, acc = 0, simTime = 0;
 function frame(ts) {
   const now = ts / 1000; if (!last) last = now; let d = now - last; last = now;
@@ -265,7 +263,9 @@ function frame(ts) {
       phase = 'settling';
     }
   }
-  draw();
+  // hand the renderer the aerial height of each in-flight boule
+  for (const b of bodies) b.airLift = b.state === 'air' ? Math.sin((b.t / b.flight) * Math.PI) * LIFT * (0.5 + b.style) : 0;
+  renderer.frame({ jack, bodies, aim, aiming, humanTurn, phase }, d);
   requestAnimationFrame(frame);
 }
 

@@ -142,11 +142,13 @@ test('Pétanque boots, a throw runs the gravel physics and settles cleanly', asy
     c.dispatchEvent(new PointerEvent('pointermove',{clientX:tx, clientY:ty, ...p}));
     c.dispatchEvent(new PointerEvent('pointerup',  {clientX:tx, clientY:ty, ...p}));
   })()`);
-  // the drag arms the shot but must NOT throw on its own — Launch becomes ready, no boule spent yet
+  // the drag arms the shot but must NOT throw on its own — Launch becomes ready, no boule spent yet.
+  // Spent boules dim via an inline opacity on the first player's dots (#scores .stat:first-child .bd).
+  const spentSel = `document.querySelectorAll('#scores .stat:first-child .bd[style*="opacity"]').length`;
   assert.ok(await waitFor(`document.getElementById('launch').classList.contains('ready')`, { timeout: 3000 }), 'Launch did not arm after aiming');
-  assert.equal(await evaluate(`document.querySelectorAll('#dots-you .bd.spent').length`), 0, 'a drag alone must not throw — only Launch does');
+  assert.equal(await evaluate(spentSel), 0, 'a drag alone must not throw — only Launch does');
   await evaluate(`document.getElementById('launch').click()`); // fire it
-  assert.ok(await waitFor(`document.querySelectorAll('#dots-you .bd.spent').length >= 1`, { timeout: 6000 }), 'the throw did not register (no spent boule) after Launch');
+  assert.ok(await waitFor(`${spentSel} >= 1`, { timeout: 6000 }), 'the throw did not register (no spent boule) after Launch');
 
   await sleep(2500); // fly → land → roll → settle, and let the AI reply
   assert.deepEqual(jsErrors, [], `console errors after a throw:\n${jsErrors.join('\n')}`);

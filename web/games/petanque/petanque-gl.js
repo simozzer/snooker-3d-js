@@ -142,9 +142,26 @@ function ringTex() {
   g.fillStyle = grd; g.fillRect(0, 0, 128, 128); return c;
 }
 
-// A machined-steel boule skin, tinted to the team. Latitude grooves (constant-v lines on the sphere) and
-// a maker's stamp give the surface features to READ as it rolls and tumbles — a bare colour never would.
-function bouleTex(base) {
+// One player emblem (circle / double-circle / square / triangle) in dark-on-light so it reads by SHAPE
+// regardless of colour — the colour-blind cue. Dark fill + bright outline, stroke widths scaled to size.
+function emblem(g, cx, cy, r, kind) {
+  if (!kind) return;
+  g.save(); g.lineJoin = 'round';
+  const lw = Math.max(1.4, r * 0.16);
+  g.fillStyle = 'rgba(20,28,38,0.9)'; g.strokeStyle = 'rgba(255,255,255,0.88)'; g.lineWidth = lw;
+  if (kind === 'circle') { g.beginPath(); g.arc(cx, cy, r * 0.7, 0, 7); g.fill(); g.stroke(); }
+  else if (kind === 'double') {
+    g.lineWidth = lw * 1.5; g.beginPath(); g.arc(cx, cy, r * 0.82, 0, 7); g.stroke();
+    g.lineWidth = lw; g.beginPath(); g.arc(cx, cy, r * 0.36, 0, 7); g.fill(); g.stroke();
+  } else if (kind === 'square') { const s = r * 0.62; g.beginPath(); g.rect(cx - s, cy - s, 2 * s, 2 * s); g.fill(); g.stroke(); }
+  else if (kind === 'triangle') { const s = r * 0.86;
+    g.beginPath(); g.moveTo(cx, cy - s); g.lineTo(cx + s * 0.87, cy + s * 0.52); g.lineTo(cx - s * 0.87, cy + s * 0.52); g.closePath(); g.fill(); g.stroke(); }
+  g.restore();
+}
+
+// A machined-steel boule skin, tinted to the team, with the team's colour-blind PATTERN stamped twice on
+// opposite sides of the equator so one emblem almost always faces the camera as the ball rolls and tumbles.
+function bouleTex(base, pattern) {
   const n = parseInt(base.slice(1), 16), br = n >> 16 & 255, bg = n >> 8 & 255, bb = n & 255;
   const mix = (r, g, b, t) => `rgb(${Math.round(br + (r - br) * t)},${Math.round(bg + (g - bg) * t)},${Math.round(bb + (b - bb) * t)})`;
   const c = cvs(256, 256), g = c.getContext('2d');
@@ -162,9 +179,10 @@ function bouleTex(base) {
   for (let i = 0; i < 1400; i++) { const x = Math.random() * 256, y = Math.random() * 256;
     g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)';
     g.fillRect(x, y, 1.5, 1.5); }
-  // a maker's stamp near one pole — an asymmetric mark so tumble is unmistakable
-  g.fillStyle = 'rgba(0,0,0,0.4)'; g.beginPath(); g.ellipse(150, 70, 20, 12, 0, 0, 7); g.fill();
-  g.strokeStyle = 'rgba(255,255,255,0.28)'; g.lineWidth = 2; g.beginPath(); g.ellipse(150, 70, 20, 12, 0, 0, 7); g.stroke();
+  // tile the player emblem all over the ball (u wraps at the seam via the 0 & 256 columns) so whatever way
+  // the boule rolls to rest, several emblems face the camera — the colour-blind cue must never hide.
+  for (let row = 0; row < 4; row++) { const cy = 26 + row * 68;
+    for (let cx = 0; cx <= 256; cx += 64) emblem(g, cx, cy, 18, pattern); }
   return c;
 }
 
@@ -322,8 +340,8 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
     gravel: tex(gl, gravelTex()), shadow: tex(gl, softDisc('30,24,14')), smoke: tex(gl, smokeTex()),
     backdrop: tex(gl, backdropTex()), glow: tex(gl, softDisc('255,255,255')),
     dust: tex(gl, softDisc('176,150,104')),
-    boule: [tex(gl, bouleTex(TEAM[0].fill[1])), tex(gl, bouleTex(TEAM[1].fill[1]))],
-    jack: tex(gl, bouleTex('#d8b45a')), ring: tex(gl, ringTex()),
+    boule: TEAM.map((t) => tex(gl, bouleTex(t.fill[1], t.pattern))), // one textured skin per player (colour + pattern)
+    jack: tex(gl, bouleTex('#d8b45a')), ring: tex(gl, ringTex()),    // the jack carries no player emblem
   };
 
   // transient particles: flight trails behind airborne boules, landing-dust puffs, impact shock-rings

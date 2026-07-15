@@ -23,7 +23,6 @@ const ROLL_MAX = 560;                     // residual speed for a full "roll" th
 const REST = 9;                           // speed below which a body is at rest
 const ROUGH = 0.9;                        // gravel character 0..1 (landing kick + rolling wobble)
 const FLIGHT_MIN = 380, FLIGHT_PER_PX = 0.9; // aerial time in ms
-const PER_TEAM = 3;
 
 // Throw control: you DRAG out from the throwing circle. The drag DIRECTION is your line, and the drag
 // LENGTH is the power (mapped to an aerial landing distance) — NOT the cursor position, so aiming the
@@ -49,9 +48,14 @@ function flightArc(from, to, loft, spin, n = 26) {
   return pts;
 }
 
+// Up to four players. Each has BOTH a colour and a distinct pattern stamped on the boule (circle,
+// double-circle, square, triangle) so colour-blind players can tell boules apart by shape alone. GLYPH
+// mirrors the pattern in the HUD/status text.
 const TEAM = [
-  { name: 'you', fill: ['#dcecff', '#5a86dd', '#31509a'] },
-  { name: 'opp', fill: ['#ffd9cb', '#d86a4f', '#9a3b2a'] },
+  { name: 'Blue',  pattern: 'circle',   glyph: '●', fill: ['#dcecff', '#5a86dd', '#31509a'] },
+  { name: 'Red',   pattern: 'double',   glyph: '◎', fill: ['#ffd9cb', '#d86a4f', '#9a3b2a'] },
+  { name: 'Green', pattern: 'square',   glyph: '■', fill: ['#cdead0', '#57ab5e', '#2f6a35'] },
+  { name: 'Amber', pattern: 'triangle', glyph: '▲', fill: ['#ffe9c2', '#e0a93a', '#946a16'] },
 ];
 
 const renderer = createPetanqueRenderer(cv, overlay, { W, H, P, THROW, R, JACK_R, TEAM });
@@ -99,8 +103,22 @@ const sfx = (() => {
   return { thud, clink, chime, resume: ensure, toggle() { muted = !muted; return muted; }, get muted() { return muted; } };
 })();
 
+// --- players + modes --------------------------------------------------------------------------------
+// Free-for-all: 2–4 players, each human or AI (closest boule to the jack takes the end; a player scores
+// one point per boule of theirs closer than the best of EVERYONE else). AI self-play = all-AI, sit back.
+const MODES = {
+  ai:      ['human', 'ai'],
+  hotseat: ['human', 'human'],
+  four:    ['human', 'ai', 'ai', 'ai'],
+  watch:   ['ai', 'ai', 'ai', 'ai'],
+};
+
 // --- state ------------------------------------------------------------------------------------------
 let jack, bodies, boulesLeft, scores, current, mode, phase, aim, aiTimer, settleTimer;
+let players = [], perPlayer = 3;
+const humanCount = () => players.filter((p) => p.kind === 'human').length;
+const playerName = (i) => (players[i].kind === 'human' && humanCount() === 1 && i === 0 ? 'You' : TEAM[i].name);
+const turnStatus = () => { const nm = playerName(current); return nm === 'You' ? 'Your throw' : `${nm}'s throw`; };
 let impacts = [];  // collision events (contact point + strength) drained each frame for shock-rings + shake
 let measureInfo = null;  // during the end's measure: the winner + the boules being counted, for the string overlay
 // The spin ball's contact point (like snooker english): side −1..+1 = hook L/R; vert −1..+1 = lob..roll.
@@ -111,14 +129,17 @@ const shotName = (v) => (v > 0.34 ? 'Roll' : v < -0.34 ? 'Lob' : 'Pitch');
 // phase: 'aim' (human to throw) | 'sim' (physics running) | 'measure' | 'over'
 
 function newMatch() {
-  scores = [0, 0];
   mode = mode || 'ai';
-  startEnd(0); // you throw the first jack
+  players = (MODES[mode] || MODES.ai).map((kind) => ({ kind }));
+  perPlayer = players.length <= 2 ? 3 : 2; // singles gets 3 boules; a crowded 3–4 player end gets 2 each
+  scores = players.map(() => 0);
+  el('status').classList.remove('win');
+  startEnd(0); // the first player throws the jack
 }
 
 function startEnd(starter) {
   bodies = [];
-  boulesLeft = [PER_TEAM, PER_TEAM];
+  boulesLeft = players.map(() => perPlayer);
   current = starter;
   // Place the jack: forward of the throw circle, within the piste, roughly where a real toss lands.
   jack = { x: W / 2 + (Math.random() - 0.5) * 260, y: H * 0.30 + (Math.random() - 0.5) * 120,
@@ -127,7 +148,7 @@ function startEnd(starter) {
   phase = 'aim';
   aim = null;
   setStrike(0, 0); // fresh end: spin ball back to centre (this also clears any stale aim preview)
-  status(`${current === 0 ? 'Your' : "Computer's"} throw — ${boulesLeft[current]} boules left`);
+  status(`${turnStatus()} — ${boulesLeft[current]} boules left`);
   syncHud();
   maybeAI();
 }
@@ -245,18 +266,33 @@ function step(dt) {
 }
 
 // --- turn flow ------------------------------------------------------------------------------------
+// Distance of a player's CLOSEST boule to the jack (Infinity if they have none down yet).
+function nearestDistOf(pi) {
+  let best = Infinity;
+  for (const b of live()) if (b.team === pi) best = Math.min(best, dist(b, jack));
+  return best;
+}
+// Pétanque's core rule, generalised to N players: whoever does NOT hold the point throws next; among the
+// non-holders with boules left, the one lying farthest from the jack (most to gain) goes. −1 → measure.
+function nextThrower() {
+  const withBoules = players.map((_, i) => i).filter((i) => boulesLeft[i] > 0);
+  if (!withBoules.length) return -1;
+  const holder = holdingTeam();
+  if (holder === -1) return withBoules.includes(current) ? current : withBoules[0];
+  const challengers = withBoules.filter((i) => i !== holder);
+  const pool = challengers.length ? challengers : withBoules; // only the holder has boules → they play on
+  pool.sort((a, b) => nearestDistOf(b) - nearestDistOf(a));
+  return pool[0];
+}
+
 function afterSettle() {
-  const hp = holdingTeam();
-  const other = (t) => (t === 0 ? 1 : 0);
-  // The team NOT holding the point throws next (pétanque's core rule).
-  let next = hp === -1 ? current : other(hp);
-  if (boulesLeft[next] <= 0) next = other(next);
-  if (boulesLeft[0] <= 0 && boulesLeft[1] <= 0) { measure(); return; }
+  const next = nextThrower();
+  if (next === -1) { measure(); return; }
   current = next;
   phase = 'aim';
   aim = null;
-  setStrike(0, 0); // each turn starts from a centred spin ball; the computer sets its own before it throws
-  status(`${current === 0 ? 'Your' : "Computer's"} throw — ${boulesLeft[current]} left`);
+  setStrike(0, 0); // each turn starts from a centred spin ball; an AI sets its own before it throws
+  status(`${turnStatus()} — ${boulesLeft[current]} left`);
   syncHud();
   maybeAI();
 }
@@ -267,46 +303,51 @@ function measure() {
   const pts = live().map((b) => ({ b, team: b.team, d: dist(b, jack) })).sort((a, b) => a.d - b.d);
   if (!pts.length) { status('No boules counted — dead end.'); setTimeout(() => startEnd(current), 1400); return; }
   const winner = pts[0].team;
-  const oppNearest = pts.find((p) => p.team !== winner)?.d ?? Infinity;
-  const counting = pts.filter((p) => p.team === winner && p.d < oppNearest);
+  const rivalNearest = pts.find((p) => p.team !== winner)?.d ?? Infinity; // best of everyone else
+  const counting = pts.filter((p) => p.team === winner && p.d < rivalNearest);
   const points = counting.length;
+  const nm = playerName(winner), youWon = players[winner].kind === 'human';
   // run the string out from the jack to the counting boules FIRST; award once the measure has been seen
   measureInfo = { winner, boules: counting.map((p) => p.b) };
-  status(`Measuring…  ${winner === 0 ? 'you' : 'the computer'} for ${points}`);
+  status(`Measuring…  ${nm === 'You' ? 'you' : nm} for ${points}`);
   setTimeout(() => {
     measureInfo = null;
     scores[winner] += points;
     syncHud();
-    if (winner === 0) sfx.chime(); // a little fanfare when you take the end
+    if (youWon) sfx.chime(); // a little fanfare when a human takes the end
     if (scores[winner] >= 13) {
       phase = 'over';
-      status(`${winner === 0 ? 'You win the match' : 'Computer wins the match'} ${scores[0]}–${scores[1]} 🎉`);
-      el('status').classList.toggle('win', winner === 0);
+      status(`${nm === 'You' ? 'You win' : `${nm} wins`} the match 🎉`);
+      el('status').classList.toggle('win', youWon);
+      syncHud();
       return;
     }
-    status(`${winner === 0 ? 'You' : 'Computer'} win${winner === 0 ? '' : 's'} the end +${points}  (${scores[0]}–${scores[1]}). New end…`);
+    const verb = nm === 'You' ? 'You win' : `${nm} wins`;
+    status(`${verb} the end +${points}. New end…`);
     setTimeout(() => startEnd(winner), 1700);
   }, 1800);
 }
 
 // --- simple AI ------------------------------------------------------------------------------------
+const isAI = (i) => players[i] && players[i].kind === 'ai';
 function maybeAI() {
   clearTimeout(aiTimer);
-  if (phase !== 'aim' || current !== 1 || mode !== 'ai') return;
+  if (phase !== 'aim' || !isAI(current)) return;
+  const me = current;
   aiTimer = setTimeout(() => {
-    if (phase !== 'aim' || current !== 1) return;
-    // If YOU hold the point with a boule hugging the jack, sometimes shoot it; otherwise point at the jack.
-    const yours = live().filter((b) => b.team === 0).sort((a, b) => dist(a, jack) - dist(b, jack))[0];
+    if (phase !== 'aim' || current !== me || !isAI(me)) return;
+    // If someone else holds the point with a boule hugging the jack, sometimes shoot it; else point at the jack.
+    const rival = live().filter((b) => b.team !== me).sort((a, b) => dist(a, jack) - dist(b, jack))[0];
     let target, loft, spin;
-    if (yours && holdingTeam() === 0 && dist(yours, jack) < 34 && Math.random() < 0.5) {
-      target = { x: yours.x, y: yours.y }; loft = 0.85; spin = 0;             // shoot: flat and hard
+    if (rival && holdingTeam() !== me && dist(rival, jack) < 34 && Math.random() < 0.45) {
+      target = { x: rival.x, y: rival.y }; loft = 0.85; spin = 0;             // shoot: flat and hard
     } else {
       const s = 30; target = { x: jack.x + (Math.random() - 0.5) * s, y: jack.y + (Math.random() - 0.5) * s };
       loft = 0.3 + Math.random() * 0.25; spin = (Math.random() - 0.5) * 0.5;  // point: gentle arc, a little hook
     }
-    // show the computer setting its shot on the spin ball, then throw a beat later so you can see it
+    // show the AI setting its shot on the spin ball, then throw a beat later so you can see it
     setStrike(spin, vertFromLoft(loft));
-    aiTimer = setTimeout(() => { if (phase === 'aim' && current === 1) throwTo(reachable(target), loft, spin, 1); }, 520);
+    aiTimer = setTimeout(() => { if (phase === 'aim' && current === me && isAI(me)) throwTo(reachable(target), loft, spin, me); }, 520);
   }, 900);
 }
 
@@ -319,7 +360,7 @@ function reachable(pt) {
   const md = clamp(d, 70, 480); const a = Math.atan2(dy, dx);
   return { x: THROW.x + Math.cos(a) * md, y: THROW.y + Math.sin(a) * md };
 }
-const humanTurn = () => phase === 'aim' && (mode === 'hotseat' || current === 0) && boulesLeft[current] > 0;
+const humanTurn = () => phase === 'aim' && players[current] && players[current].kind === 'human' && boulesLeft[current] > 0;
 
 // Turn a pointer position into a throw: DIRECTION from the circle = line; DRAG LENGTH = power → distance.
 function aimFrom(pos) {
@@ -391,23 +432,22 @@ function frame(ts) {
 }
 
 // --- HUD / controls -------------------------------------------------------------------------------
-function dots(id, team) {
-  const spent = PER_TEAM - boulesLeft[team];
-  el(id).innerHTML = Array.from({ length: PER_TEAM }, (_, i) => `<span class="bd ${team === 0 ? 'you' : 'opp'}${i < spent ? ' spent' : ''}"></span>`).join('');
-}
+const dotGrad = (i) => `radial-gradient(circle at 35% 30%, ${TEAM[i].fill[0]}, ${TEAM[i].fill[1]} 70%)`;
 function syncHud() {
-  el('score-you').textContent = scores[0]; el('score-opp').textContent = scores[1];
-  dots('dots-you', 0); dots('dots-opp', 1);
+  el('scores').innerHTML = players.map((p, i) => {
+    const spent = perPlayer - boulesLeft[i];
+    const dots = Array.from({ length: perPlayer }, (_, k) =>
+      `<span class="bd" style="background:${dotGrad(i)}${k < spent ? ';opacity:.2' : ''}"></span>`).join('');
+    const tag = p.kind === 'ai' ? '<span class="ai">AI</span>' : '';
+    return `<div class="stat${i === current && phase !== 'over' && phase !== 'measure' ? ' turn' : ''}">`
+      + `<span class="pat" style="color:${TEAM[i].fill[1]}">${TEAM[i].glyph}</span>`
+      + `<b>${scores[i]}</b><span class="nm">${playerName(i)}</span>${tag}`
+      + `<span class="dotrow">${dots}</span></div>`;
+  }).join('');
 }
 const status = (t) => { el('status').classList.remove('win'); el('status').textContent = t; };
 
-el('mode').addEventListener('click', () => {
-  mode = mode === 'ai' ? 'hotseat' : 'ai';
-  el('mode').textContent = mode === 'ai' ? 'vs Computer' : 'Pass & play';
-  el('mode').classList.toggle('active', mode === 'hotseat');
-  el('score-opp').parentElement.childNodes[el('score-opp').parentElement.childNodes.length - 1].textContent = mode === 'ai' ? ' Comp' : ' Red';
-  newMatch();
-});
+el('mode').addEventListener('change', () => { mode = el('mode').value; newMatch(); });
 // --- spin ball (snooker-style english) ------------------------------------------------------------
 // One steel ball you set the contact point on: up = roll on (follow), down = lob / drop dead (draw),
 // out to the side = hook the flight. It feeds `strike`, which aimFrom turns into loft + spin.
@@ -477,5 +517,6 @@ el('mute').addEventListener('click', () => {
 
 el('build').textContent = `Pétanque · v${VERSION}`;
 mode = 'ai';
+el('mode').value = mode;
 newMatch();
 requestAnimationFrame(frame);

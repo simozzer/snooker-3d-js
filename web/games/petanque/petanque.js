@@ -205,6 +205,75 @@ const referee = (() => {
     { fr: 'Ma boule obéit à mes pensées.', en: 'My boule obeys my thoughts.' }, { fr: "J'ai vécu mille vies.", en: 'I have lived a thousand lives.' },
     { fr: 'Je fais pleuvoir en claquant des doigts.', en: 'I make it rain by snapping my fingers.' },
     { fr: "J'ai appris à lire aux poissons.", en: 'I taught fish to read.' }, { fr: 'Le vent me demande la permission.', en: 'The wind asks my permission.' },
+    { fr: "Un phoque m'a poussé sous la douche.", en: 'A seal pushed me in the shower.' }, { fr: "J'ai appris à nager à un chameau.", en: 'I taught a camel to swim.' },
+    { fr: 'Mon frigo écrit de la poésie.', en: 'My fridge writes poetry.' }, { fr: "J'ai chatouillé une baleine.", en: 'I tickled a whale.' },
+    { fr: 'Les nuages me doivent un dîner.', en: 'The clouds owe me a dinner.' }, { fr: "J'ai vendu la tour Eiffel à un pingouin.", en: 'I sold the Eiffel Tower to a penguin.' },
+    { fr: 'Mon réveil a peur de moi.', en: 'My alarm clock is afraid of me.' }, { fr: "J'ai couru plus vite qu'un TGV.", en: 'I ran faster than a bullet train.' },
+    { fr: "Une girafe m'a demandé un autographe.", en: 'A giraffe asked me for an autograph.' }, { fr: "J'ai repeint le ciel en bleu moi-même.", en: 'I painted the sky blue myself.' },
+    { fr: 'Mon oreiller garde mes secrets.', en: 'My pillow keeps my secrets.' }, { fr: "J'ai battu un singe au concours de grimaces.", en: 'I beat a monkey at pulling faces.' },
+    { fr: 'Le fromage me téléphone la nuit.', en: 'The cheese phones me at night.' }, { fr: "J'ai appris à un orage à s'asseoir.", en: 'I trained a storm to sit.' },
+    { fr: 'Ma boule connaît toutes les capitales.', en: 'My boule knows every capital city.' }, { fr: "J'ai fait rire une statue.", en: 'I made a statue laugh.' },
+    { fr: "Un escargot m'a doublé, je l'ai laissé gagner.", en: 'A snail overtook me; I let it win.' }, { fr: "J'ai un abonnement à la lune.", en: 'I have a subscription to the moon.' },
+    { fr: "Mon chapeau parle avec l'accent italien.", en: 'My hat speaks with an Italian accent.' }, { fr: "J'ai chassé le brouillard avec un balai.", en: 'I chased the fog off with a broom.' },
+    { fr: 'Les abeilles me demandent conseil.', en: 'The bees ask me for advice.' }, { fr: "J'ai gagné une médaille en dormant.", en: 'I won a medal in my sleep.' },
+    { fr: 'Mon pantalon a plus voyagé que moi.', en: 'My trousers have travelled more than me.' }, { fr: "J'ai réconcilié deux pigeons.", en: 'I made peace between two pigeons.' },
+    { fr: "Une tempête m'a présenté ses excuses.", en: 'A storm apologised to me.' }, { fr: "J'ai appris le violon à un âne.", en: 'I taught a donkey the violin.' },
+    { fr: 'Mon ombre travaille le week-end.', en: 'My shadow works weekends.' }, { fr: "J'ai mangé une horloge, je suis toujours à l'heure.", en: "I ate a clock; I'm always on time." },
+    { fr: 'Le vent range ma chambre.', en: 'The wind tidies my room.' }, { fr: "J'ai un cousin qui est une montagne.", en: 'I have a cousin who is a mountain.' },
+    { fr: "J'ai battu l'écho à la course.", en: 'I beat the echo in a race.' }, { fr: 'Ma grand-mère a inventé le tonnerre.', en: 'My grandmother invented thunder.' },
+    { fr: "J'ai signé un traité avec une guêpe.", en: 'I signed a treaty with a wasp.' }, { fr: 'Mon café me fait la révérence.', en: 'My coffee bows to me.' },
+    { fr: "J'ai fait pousser une baguette dans mon jardin.", en: 'I grew a baguette in my garden.' }, { fr: "Un dauphin m'a appris à siffler.", en: 'A dolphin taught me to whistle.' },
+    { fr: "J'ai battu un flamant rose aux échecs.", en: 'I beat a flamingo at chess.' }, { fr: 'Ma valise rentre seule à la maison.', en: 'My suitcase comes home on its own.' },
+    { fr: "J'ai réparé le soleil avec du scotch.", en: 'I fixed the sun with sticky tape.' }, { fr: "Les montagnes s'écartent quand j'arrive.", en: 'The mountains step aside when I arrive.' },
+    { fr: "J'ai un contrat avec l'arc-en-ciel.", en: 'I have a contract with the rainbow.' }, { fr: 'Mon chien a été maire un été.', en: 'My dog was mayor one summer.' },
+    { fr: "J'ai fait la course avec mon ombre et j'ai gagné.", en: 'I raced my own shadow and won.' }, { fr: "J'ai appris à un poisson à faire du vélo.", en: 'I taught a fish to ride a bike.' },
+    { fr: 'La pluie ne tombe que sur mes rivaux.', en: 'The rain falls only on my rivals.' }, { fr: "J'ai un diplôme de sieste avancée.", en: 'I have a degree in advanced napping.' },
+    { fr: "Mon parapluie ne s'ouvre pas sans pourboire.", en: "My umbrella won't open without a tip." }, { fr: "J'ai chatouillé un cactus sans me piquer.", en: 'I tickled a cactus without a scratch.' },
+    { fr: "J'ai vu une vache en trottinette.", en: 'I saw a cow on a scooter.' }, { fr: 'Mon miroir me trouve trop beau.', en: 'My mirror finds me too handsome.' },
+    { fr: "J'ai apprivoisé un tremblement de terre.", en: 'I tamed an earthquake.' }, { fr: "Une baguette m'a demandé en mariage.", en: 'A baguette proposed to me.' },
+    { fr: "J'ai gagné une bataille de boules de neige en été.", en: 'I won a snowball fight in summer.' }, { fr: "Mon réveil chante l'opéra.", en: 'My alarm sings opera.' },
+    { fr: "J'ai emprunté la Lune à un ami.", en: 'I borrowed the Moon from a friend.' }, { fr: "Un ours m'appelle 'chef'.", en: "A bear calls me 'boss'." },
+    { fr: "J'ai coiffé un lion.", en: "I combed a lion's mane." }, { fr: 'Ma boule refuse de perdre par principe.', en: 'My boule refuses to lose on principle.' },
+    { fr: "J'ai appris à voler à une poule.", en: 'I taught a hen to fly.' }, { fr: 'Le tonnerre applaudit mes lancers.', en: 'The thunder applauds my throws.' },
+    { fr: "J'ai dîné avec le brouillard.", en: 'I dined with the fog.' }, { fr: 'Mon vélo a fait le tour du monde sans moi.', en: 'My bike toured the world without me.' },
+    { fr: "J'ai convaincu un volcan de se calmer.", en: 'I convinced a volcano to calm down.' }, { fr: "Une tortue m'a défié en duel.", en: 'A tortoise challenged me to a duel.' },
+    { fr: "J'ai remporté le championnat des rêves.", en: 'I won the dreaming championship.' }, { fr: 'Mon chat dirige une banque.', en: 'My cat runs a bank.' },
+    { fr: "J'ai peint les yeux fermés, ça a gagné un prix.", en: 'I painted blindfolded and it won a prize.' }, { fr: "J'ai fait taire une mouette d'un regard.", en: 'I silenced a seagull with one look.' },
+    { fr: 'Le soleil me prête ses lunettes.', en: 'The sun lends me its sunglasses.' }, { fr: "J'ai enseigné les maths à une chèvre.", en: 'I taught maths to a goat.' },
+    { fr: 'Ma moustache a son propre fan-club.', en: 'My moustache has its own fan club.' }, { fr: "J'ai gagné une course d'escargots à reculons.", en: 'I won a snail race walking backwards.' },
+    { fr: "J'ai réveillé un ours poliment.", en: 'I woke a bear politely.' }, { fr: 'Mon canapé a le mal de mer.', en: 'My sofa gets seasick.' },
+    { fr: "J'ai remonté la rivière à la nage en lisant le journal.", en: 'I swam upstream reading the newspaper.' }, { fr: "Une comète m'a fait un clin d'œil.", en: 'A comet winked at me.' },
+    { fr: "J'ai gagné à la loterie avant de jouer.", en: 'I won the lottery before playing.' }, { fr: 'Mon parapluie a peur de la pluie.', en: 'My umbrella is afraid of the rain.' },
+    { fr: "J'ai appris la politesse à un requin.", en: 'I taught a shark manners.' }, { fr: 'Les statues me saluent quand je passe.', en: 'The statues salute me as I pass.' },
+    { fr: "J'ai fait du toboggan sur un arc-en-ciel.", en: 'I sledged down a rainbow.' }, { fr: 'Mon grille-pain me raconte des blagues.', en: 'My toaster tells me jokes.' },
+    { fr: "J'ai battu le vent à la course.", en: 'I beat the wind in a race.' }, { fr: "Une autruche m'a emprunté mes chaussures.", en: 'An ostrich borrowed my shoes.' },
+    { fr: "J'ai appris le tango à un pingouin.", en: 'I taught a penguin the tango.' }, { fr: 'Ma boule a été décorée par le président.', en: 'My boule was decorated by the president.' },
+    { fr: "J'ai fait fondre un iceberg d'un sourire.", en: 'I melted an iceberg with a smile.' }, { fr: "Le brouillard s'écarte pour me laisser passer.", en: 'The fog parts to let me through.' },
+    { fr: "J'ai gagné un débat contre un perroquet.", en: 'I won a debate against a parrot.' }, { fr: 'Mon ombre a peur du noir.', en: 'My shadow is afraid of the dark.' },
+    { fr: "J'ai coursé un guépard et je me suis retenu.", en: 'I raced a cheetah and held back.' }, { fr: "Une méduse m'a serré la main.", en: 'A jellyfish shook my hand.' },
+    { fr: "J'ai bâti un pont en spaghettis.", en: 'I built a bridge out of spaghetti.' }, { fr: "Mon horloge accélère quand je m'ennuie.", en: 'My clock speeds up when I get bored.' },
+    { fr: "J'ai gagné un concours de silence en parlant.", en: 'I won a silence contest by talking.' }, { fr: "Un crocodile m'a demandé ma recette de soupe.", en: 'A crocodile asked for my soup recipe.' },
+    { fr: "J'ai fait la sieste au sommet du mont Blanc.", en: 'I napped on top of Mont Blanc.' }, { fr: 'Mon écharpe part en vacances sans moi.', en: 'My scarf goes on holiday without me.' },
+    { fr: "J'ai chatouillé les nuages avec une échelle.", en: 'I tickled the clouds with a ladder.' }, { fr: "J'ai appris à un hérisson à faire des câlins.", en: 'I taught a hedgehog to hug.' },
+    { fr: 'Le destin me demande conseil.', en: 'Fate asks me for advice.' }, { fr: "J'ai remonté le temps pour rater le bus.", en: 'I travelled back in time to miss the bus.' },
+    { fr: "J'ai un lézard qui gère mes impôts.", en: 'I have a lizard who does my taxes.' }, { fr: 'Ma boule a gagné un César.', en: 'My boule won a film award.' },
+    { fr: "J'ai fait la queue devant moi-même.", en: 'I queued up behind myself.' }, { fr: 'Les vagues me font signe de la main.', en: 'The waves wave back at me.' },
+    // — dry sarcasm: the ref, thoroughly unimpressed —
+    { fr: 'Oh, superbe. Vraiment.', en: 'Oh, lovely. Truly.' }, { fr: 'Quel talent. On applaudit.', en: 'What talent. A round of applause.' },
+    { fr: 'Bravo, raté de très loin.', en: 'Bravo, missed by a mile.' }, { fr: 'Magnifique lancer… pour un débutant.', en: 'Magnificent throw… for a beginner.' },
+    { fr: "Non, non, vise ailleurs, c'est parfait.", en: "No, no, aim somewhere else, that's perfect." }, { fr: "Impressionnant. Ma grand-mère fait mieux.", en: 'Impressive. My granny does better.' },
+    { fr: 'Ah oui, brillant. Vraiment brillant.', en: 'Ah yes, brilliant. Truly brilliant.' }, { fr: "Tu t'es entraîné pour ça ?", en: 'You practised for that?' },
+    { fr: 'Génial, encore raté. Quelle constance.', en: 'Great, missed again. Such consistency.' }, { fr: 'Oh là là, quel suspense insoutenable.', en: 'Oh my, what unbearable suspense.' },
+    { fr: "C'était… un choix.", en: 'That was… a choice.' }, { fr: 'Formidable. On rentre à la maison ?', en: 'Terrific. Shall we go home now?' },
+    { fr: "Chef-d'œuvre. Le Louvre appelle.", en: 'A masterpiece. The Louvre is calling.' }, { fr: "Ne change rien, c'est parfaitement médiocre.", en: "Don't change a thing, it's perfectly mediocre." },
+    { fr: 'Ouah. Sans voix. Malheureusement.', en: "Wow. Speechless. Sadly." }, { fr: 'Superbe visée. Le mur te remercie.', en: 'Lovely aim. The wall thanks you.' },
+    { fr: 'Tu vises le cochonnet ou le parking ?', en: 'Aiming at the jack or the car park?' }, { fr: "Quelle audace, rater d'aussi près.", en: 'How bold, to miss from so close.' },
+    { fr: 'Applaudissements polis.', en: 'Polite applause.' }, { fr: 'Excellent, tu as réveillé la poussière.', en: 'Excellent, you woke up the dust.' },
+    { fr: "J'en pleure. De rire.", en: "I'm in tears. Of laughter." }, { fr: 'Un vrai professionnel… du dimanche.', en: 'A true professional… on Sundays.' },
+    { fr: "Continue, ça m'occupe.", en: 'Carry on, it passes the time.' }, { fr: 'Sublime. Recommence, pour rire.', en: 'Sublime. Do it again, for a laugh.' },
+    { fr: 'Oh, tu tires maintenant ? Courageux.', en: "Oh, shooting now? Brave." }, { fr: 'Le cochonnet est par là, au cas où.', en: 'The jack is over there, just so you know.' },
+    { fr: 'Précision chirurgicale… de bûcheron.', en: 'Surgical precision… for a lumberjack.' }, { fr: "Bien joué. Enfin, 'joué'.", en: "Well played. Well, 'played'." },
+    { fr: "Tu progresses. Vers l'arrière.", en: "You're improving. Backwards." }, { fr: 'Napoléon serait fier. Ou pas.', en: 'Napoleon would be proud. Or not.' },
   ];
   const node = el('ref'), sub = el('subtitle');
   let last = -1, hideT = 0, voices = [];
@@ -275,6 +344,7 @@ function newMatch() {
 
 function startEnd(starter) {
   seq++; clearTimeout(aiTimer); // fresh end: invalidate any pending AI think/throw
+  renderer.setOverhead(false);  // in case a between-shots fly-over was cut short by a restart
   bodies = [];
   boulesLeft = players.map(() => perPlayer);
   current = starter;
@@ -441,6 +511,7 @@ function afterSettle() {
 
 function measure() {
   seq++; clearTimeout(aiTimer); // no AI throws during the measure
+  renderer.setOverhead(false);  // back to the ground-level view to run the string out
   phase = 'measure';
   measureInfo = null;
   const pts = live().map((b) => ({ b, team: b.team, d: dist(b, jack) })).sort((a, b) => a.d - b.d);
@@ -555,6 +626,8 @@ el('launch').addEventListener('click', launch);
 // --- loop -----------------------------------------------------------------------------------------
 // Physics still runs in 2D plan coords; the WebGL renderer draws that state in 3D each frame.
 let last = 0, acc = 0, simTime = 0, throwAt = 0;
+const OVERHEAD_HOLD_MS = 1500; // settle → pan up (~0.8s) + hold overhead before easing back down
+const PAN_BACK_MS = 1000;      // slow drift home; the turn is handed over as it nears the play view
 function frame(ts) {
   const now = ts / 1000; if (!last) last = now; let d = now - last; last = now;
   if (d > 0.05) d = 0.05;
@@ -567,11 +640,22 @@ function frame(ts) {
         b.state = 'rest'; b.vx = b.vy = 0;
       });
       simTime = 0; acc = 0;
-      // hold the next move until the current one has had at least ~1.5s to play out (fixes rushed/stalled
-      // transitions between moves); normal throws already exceed this, so it only paces the very quick ones.
-      const gap = Math.max(300, 1500 - (performance.now() - throwAt));
-      clearTimeout(settleTimer); settleTimer = setTimeout(afterSettle, gap);
       phase = 'settling';
+      clearTimeout(settleTimer);
+      // Between shots: swing up to a bird's-eye over the jack so you can read which boule lies nearest, hold
+      // it a beat, then ease slowly back down to the play view before the next player throws. This also gives
+      // each move at least ~1.5s to play out (fixes rushed/stalled transitions). Skip the fly-over on the very
+      // first boule of an end if nothing's actually landed to judge.
+      if (live().length) {
+        renderer.setOverhead(true, jack);
+        settleTimer = setTimeout(() => {
+          renderer.setOverhead(false);                        // start drifting back down…
+          settleTimer = setTimeout(afterSettle, PAN_BACK_MS);  // …then hand the turn over once we're nearly home
+        }, OVERHEAD_HOLD_MS);
+      } else {
+        const gap = Math.max(300, 1500 - (performance.now() - throwAt));
+        settleTimer = setTimeout(afterSettle, gap);
+      }
     }
   }
   // b.airLift is set by the physics step during flight; the renderer reads it for the 3D arc.

@@ -379,16 +379,30 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
   }
 
   // ---- camera --------------------------------------------------------------------------------------
-  let vp = M.perspective(1, 1, 1, 1), camPos = [0, 300, 470], t = 0, shake = 0;
+  let vp = M.perspective(1, 1, 1, 1), camPos = [0, 300, 470], camCtr = [0, 18, -30], t = 0, shake = 0;
+  // Between shots the game asks for a bird's-eye look at the jack (to show what's nearest), then eases back.
+  // `over` is the live 0→1 blend toward the overhead pose; `overTarget` is where the game wants it.
+  let over = 0, overTarget = 0, overFocus = [0, 0, -30];
+  function setOverhead(on, focus) {
+    overTarget = on ? 1 : 0;
+    if (focus) overFocus = [focus.x - W / 2, 0, focus.y - H / 2];
+  }
+  const lerp = (a, b, k) => a + (b - a) * k;
   function updateCamera(dt) {
     t += dt;
     shake = Math.max(0, shake - dt * 2.4); // impact shake decays back to the steady drift
+    // ease toward the target pose — pan up briskly, drift back down slowly so play resumes gently
+    over += (overTarget - over) * Math.min(1, dt * (overTarget > over ? 2.7 : 1.9));
+    const e = over * over * (3 - 2 * over); // smoothstep: no hard start/stop on the swing
     const sway = Math.sin(t * 0.12) * 26;
     const sx = (Math.random() - 0.5) * shake * 26, sy = (Math.random() - 0.5) * shake * 15;
-    camPos = [sway + sx, 292 + Math.sin(t * 0.09) * 8 + sy, 486];
+    // the two poses we blend between: the low play camera behind the circle, and a high look straight over the jack
+    const playEye = [sway + sx, 292 + Math.sin(t * 0.09) * 8 + sy, 486], playCtr = [0, 18, -30];
+    const overEye = [overFocus[0], 500, overFocus[2] + 170], overCtr = [overFocus[0], 0, overFocus[2]];
+    camPos = [lerp(playEye[0], overEye[0], e), lerp(playEye[1], overEye[1], e), lerp(playEye[2], overEye[2], e)];
+    camCtr = [lerp(playCtr[0], overCtr[0], e), lerp(playCtr[1], overCtr[1], e), lerp(playCtr[2], overCtr[2], e)];
     const proj = M.perspective(40 * Math.PI / 180, glCanvas.width / glCanvas.height, 1, 4000);
-    const view = M.lookAt(camPos, [0, 18, -30], [0, 1, 0]);
-    vp = M.mul(proj, view);
+    vp = M.mul(proj, M.lookAt(camPos, camCtr, [0, 1, 0]));
   }
 
   function resize() {
@@ -460,7 +474,7 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
     drawMesh(GROUND, 0, M.model(0, 0, 0, 1), { useTex: 1, texId: T.gravel, amb: 0.62, uv: 1 });
 
     // camera basis for billboards
-    const fwd = V.norm(V.sub([0, 18, -30], camPos));
+    const fwd = V.norm(V.sub(camCtr, camPos));
     const right = V.norm(V.cross([0, 1, 0], fwd));
     const camUp = V.cross(fwd, right);
 
@@ -631,5 +645,5 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
   function hex(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
 
   resize();
-  return { frame, screenToGround, worldToScreen, react, resize };
+  return { frame, screenToGround, worldToScreen, react, resize, setOverhead };
 }

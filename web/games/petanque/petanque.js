@@ -292,7 +292,7 @@ function land(b) {
   b.vx = Math.cos(kickAng) * kickSpd;
   b.vy = Math.sin(kickAng) * kickSpd;
   sfx.thud();
-  referee.announce(); // le référé français
+  if (Math.random() < 0.3) referee.announce(); // the French ref only pipes up ~30% of landings
 }
 
 // --- physics --------------------------------------------------------------------------------------

@@ -144,6 +144,25 @@ const referee = (() => {
     'Le train pour Paris est en retard.', "J'ai épousé une baguette.", 'Le chat a mangé le maire.',
     'Range ta chambre !', 'Ne mange pas le cochonnet !', 'Tu joues comme mon grand-père.',
     'Encore une catastrophe !', 'La vache regarde le train.', 'Mon chapeau a des opinions.',
+    // ridiculous boasts and claims
+    "J'ai inventé le fromage.", 'Je suis le roi de la pétanque.', 'Mon chien parle trois langues.',
+    "J'ai mangé la lune hier soir.", 'Je peux voler quand personne ne regarde.',
+    "J'ai battu Napoléon aux boules.", "Ma moustache prédit l'avenir.", "J'ai deux cents ans.",
+    'Je suis champion du monde de sieste.', "J'ai un doctorat en fromage.",
+    'Je parle couramment le canard.', "J'ai gagné le Tour de France à pied.", 'Mes boules sont magiques.',
+    "Je n'ai jamais perdu une partie.", "J'ai dressé une armée d'escargots.",
+    'Le soleil se lève pour me saluer.', "Je suis plus fort qu'un tracteur.",
+    'Mon béret est béni par le pape.', "J'ai inventé la marche arrière.", 'Je peux soulever un cheval.',
+    "J'ai trois estomacs.", "J'ai vu le futur, c'est bleu.", 'Je cuisine mieux que ta mère.',
+    'Ma boule a un diplôme.', "J'ai domestiqué le tonnerre.", 'Personne ne lance comme moi.',
+    "J'ai gagné à la loterie douze fois.", "Je suis l'inventeur du dimanche.",
+    "Mon chat me doit de l'argent.", "J'ai mangé un dictionnaire, je sais tout.",
+    "J'ai un jumeau sur la lune.", 'Ma grand-mère soulève des voitures.', "J'ai inventé le silence.",
+    'Les pigeons travaillent pour moi.', "J'ai écrit la Marseillaise.", 'Je suis invisible le mardi.',
+    'Mon parapluie contrôle la météo.', "J'ai battu un ours au bras de fer.",
+    'Je suis le meilleur, demandez à ma mère.', "J'ai inventé l'eau.", 'Ma boule obéit à mes pensées.',
+    "J'ai vécu mille vies.", 'Je fais pleuvoir en claquant des doigts.', "J'ai appris à lire aux poissons.",
+    'Le vent me demande la permission.',
   ];
   const node = el('ref');
   let last = -1, hideT = 0, voice = null;

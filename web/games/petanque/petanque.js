@@ -56,6 +56,49 @@ const TEAM = [
 
 const renderer = createPetanqueRenderer(cv, overlay, { W, H, P, THROW, R, JACK_R, TEAM });
 
+// --- procedural sound (WebAudio, zero assets) -----------------------------------------------------
+// A soft gravel thud on landing, a metallic clink on a collision (pitched by how hard the click was),
+// and a little chime when you take an end. The context is created/resumed on your first gesture.
+const sfx = (() => {
+  let ctx = null, muted = false, lastClink = 0;
+  const ensure = () => {
+    try { if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)(); if (ctx.state === 'suspended') ctx.resume(); } catch { /* no audio */ }
+    return ctx;
+  };
+  function thud() {
+    const c = ensure(); if (!c || muted) return;
+    const t = c.currentTime, len = Math.floor(0.16 * c.sampleRate);
+    const buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.2); // gravel crunch
+    const src = c.createBufferSource(); src.buffer = buf;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 430;
+    const g = c.createGain(); g.gain.value = 0.16;
+    src.connect(lp).connect(g).connect(c.destination); src.start(t);
+  }
+  function clink(s) {
+    const c = ensure(); if (!c || muted) return;
+    const now = (typeof performance !== 'undefined' ? performance.now() : 0);
+    if (now - lastClink < 45) return; lastClink = now; // don't machine-gun on a cluster
+    const t = c.currentTime, freq = 880 + s * 1500, vol = 0.04 + s * 0.16;
+    for (const mul of [1, 1.48]) {
+      const o = c.createOscillator(); o.type = 'triangle'; o.frequency.value = freq * mul;
+      const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.18);
+      o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.2);
+    }
+  }
+  function chime() {
+    const c = ensure(); if (!c || muted) return;
+    const t0 = c.currentTime;
+    [523, 659, 784, 1047].forEach((f, i) => {
+      const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+      const g = c.createGain(), t = t0 + i * 0.1;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.15, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.4);
+      o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.42);
+    });
+  }
+  return { thud, clink, chime, resume: ensure, toggle() { muted = !muted; return muted; }, get muted() { return muted; } };
+})();
+
 // --- state ------------------------------------------------------------------------------------------
 let jack, bodies, boulesLeft, scores, current, mode, phase, aim, aiTimer, settleTimer;
 let impacts = [];  // collision events (contact point + strength) drained each frame for shock-rings + shake
@@ -142,6 +185,7 @@ function land(b) {
   const kickSpd = runSpeed * grab * (1 + (Math.random() - 0.5) * 0.4 * ROUGH) + (Math.random() * 22 * ROUGH);
   b.vx = Math.cos(kickAng) * kickSpd;
   b.vy = Math.sin(kickAng) * kickSpd;
+  sfx.thud();
 }
 
 // --- physics --------------------------------------------------------------------------------------
@@ -192,6 +236,7 @@ function step(dt) {
         if (a.state === 'rest') a.state = 'ground'; if (c.state === 'rest') c.state = 'ground';
         const s = Math.min(1, Math.abs(vn) / 300); // how hard the click was → ring size + camera kick
         if (s > 0.1) impacts.push({ x: a.x + nx * a.r, y: a.y + ny * a.r, s });
+        if (s > 0.16) sfx.clink(s);
       }
       if (jack.team === -1) clampInto(jack);
     }
@@ -231,6 +276,7 @@ function measure() {
     measureInfo = null;
     scores[winner] += points;
     syncHud();
+    if (winner === 0) sfx.chime(); // a little fanfare when you take the end
     if (scores[winner] >= 13) {
       phase = 'over';
       status(`${winner === 0 ? 'You win the match' : 'Computer wins the match'} ${scores[0]}–${scores[1]} 🎉`);
@@ -288,6 +334,7 @@ function aimFrom(pos) {
 
 let aiming = false;
 cv.addEventListener('pointerdown', (ev) => {
+  sfx.resume(); // unlock WebAudio on the first user gesture
   if (!humanTurn()) return;
   aiming = true; aim = aimFrom(renderer.screenToGround(ev.clientX, ev.clientY));
   try { cv.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
@@ -397,6 +444,16 @@ drawSpinBall(); syncShot();
 
 el('measure').addEventListener('click', () => { if (phase === 'aim') measure(); });
 el('newgame').addEventListener('click', () => newMatch());
+
+// mute toggle (remembered across sessions)
+let startMuted = false; try { startMuted = localStorage.getItem('petanque-muted') === '1'; } catch { /* no storage */ }
+if (startMuted) sfx.toggle();
+el('mute').textContent = sfx.muted ? '🔇' : '🔊';
+el('mute').addEventListener('click', () => {
+  const m = sfx.toggle(); sfx.resume();
+  el('mute').textContent = m ? '🔇' : '🔊';
+  try { localStorage.setItem('petanque-muted', m ? '1' : '0'); } catch { /* no storage */ }
+});
 
 el('build').textContent = `Pétanque · v${VERSION}`;
 mode = 'ai';

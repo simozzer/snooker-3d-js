@@ -23,6 +23,7 @@
 
     .hud { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; margin: 12px 8px 8px; max-width: 900px; }
     .controls { display: inline-flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+    #menuBtn { display: none; font-size: 18px; line-height: 1; padding: 6px 12px; }  /* only shown on small/landscape screens */
     .scores { display: inline-flex; gap: 7px; flex-wrap: wrap; justify-content: center; }
     .stat { background: #1b2229; border: 1px solid #2a333d; border-radius: 10px; padding: 6px 10px; font-size: 13px; color: #cfe0ee; display: flex; gap: 6px; align-items: center; }
     .stat.turn { border-color: #ffd45b; box-shadow: 0 0 0 1px #ffd45b, 0 0 10px rgba(255,212,91,.28); }
@@ -94,10 +95,15 @@
       #scores .stat { padding: 3px 7px; font-size: 11px; border-radius: 8px; }
       #scores .stat b { font-size: 12px; }
       #scores .bd { width: 8px; height: 8px; }
-      /* game controls — small cluster, top-right (select capped + ellipsised so it can't crowd the scores) */
-      .controls { position: fixed; top: 3px; right: 6px; z-index: 40; gap: 5px; flex-wrap: nowrap; }
-      .controls select, .controls button { padding: 5px 7px; font-size: 11px; border-radius: 7px; }
-      .controls select { max-width: 104px; text-overflow: ellipsis; }
+      /* game controls collapse behind a ⋯ menu, top-right, so the top strip stays clear */
+      #menuBtn { display: inline-flex; align-items: center; justify-content: center; position: fixed;
+        top: 3px; right: 6px; z-index: 61; padding: 4px 11px; font-size: 17px; }
+      #menuBtn[aria-expanded="true"] { background: #3f5568; }
+      .controls { position: fixed; top: 36px; right: 6px; z-index: 60; display: none; flex-direction: column;
+        align-items: stretch; gap: 6px; padding: 8px; background: rgba(16,21,27,.95); border: 1px solid #2a333d;
+        border-radius: 10px; box-shadow: 0 12px 26px rgba(0,0,0,.55); min-width: 148px; }
+      .controls.open { display: flex; }
+      .controls select, .controls button { width: 100%; max-width: none; font-size: 12px; padding: 8px 10px; border-radius: 7px; }
       /* the spin/roll ball — bottom-left, mirroring the Launch button bottom-right */
       .shot { position: fixed; left: 8px; bottom: 8px; z-index: 60; gap: 6px; padding: 4px 8px 4px 4px;
         background: rgba(20,26,32,.82); border-color: #38424d; }
@@ -126,6 +132,7 @@
       <canvas id="spinball" width="132" height="132" tabindex="0"></canvas>
       <div class="shotread"><b id="shot-name">Pitch</b><span id="shot-sub">straight</span></div>
     </div>
+    <button id="menuBtn" class="sec" title="Menu" aria-label="Menu" aria-expanded="false">⋯</button>
     <div class="controls">
       <select id="mode" title="Who's playing">
         <option value="ai">You vs Computer</option>

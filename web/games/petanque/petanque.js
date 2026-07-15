@@ -290,19 +290,23 @@ const referee = (() => {
     { de: 'SITZT!', en: "That's got it!" }, { de: 'ENDLICH!', en: 'Finally!' }, { de: 'HOPPLA!', en: 'Whoops!' },
   ];
   const node = el('ref'), sub = el('subtitle');
-  let last = -1, lastG = -1, hideT = 0, frVoices = [], deVoices = [];
-  // Grab the French AND German voices the device offers (the set varies by OS/browser).
-  const loadVoices = () => { try { const all = speechSynthesis.getVoices();
-    frVoices = all.filter((v) => /^fr/i.test(v.lang)); deVoices = all.filter((v) => /^de/i.test(v.lang));
+  let last = -1, lastG = -1, hideT = 0, allVoices = [], frVoices = [], deVoices = [];
+  // Grab ALL voices, and the French / German subsets (the installed set varies wildly by OS/browser).
+  const loadVoices = () => { try { allVoices = speechSynthesis.getVoices() || [];
+    frVoices = allVoices.filter((v) => /^fr/i.test(v.lang)); deVoices = allVoices.filter((v) => /^de/i.test(v.lang));
   } catch { /* none */ } };
   try { loadVoices(); if (speechSynthesis.onvoiceschanged !== undefined) speechSynthesis.onvoiceschanged = loadVoices; } catch { /* no TTS */ }
+  const pick = (arr) => arr[(Math.random() * arr.length) | 0];
   function speak(text, { german = false } = {}) {
     if (sfx.muted) return;
     try {
+      loadVoices(); // voices can populate late; refresh so the German pool isn't missed on early calls
       const u = new SpeechSynthesisUtterance(text);
       u.lang = german ? 'de-DE' : 'fr-FR';
-      const pool = german ? deVoices : frVoices;
-      if (pool.length) u.voice = pool[(Math.random() * pool.length) | 0];
+      // Prefer the right language, but ALWAYS fall back to any available voice so the line is actually HEARD.
+      // (Many devices ship no German voice — without this the de-DE utterance would play silently.)
+      const voice = pick(german ? deVoices : frVoices) || pick(german ? frVoices : deVoices) || pick(allVoices);
+      if (voice) u.voice = voice;
       if (german) {                            // shouted + guttural: low pitch, brisk, full volume
         u.pitch = 0.3 + Math.random() * 0.3;
         u.rate = 1.0 + Math.random() * 0.25;
@@ -800,6 +804,17 @@ drawSpinBall(); syncShot();
 
 el('measure').addEventListener('click', () => { if (phase === 'aim') measure(); });
 el('newgame').addEventListener('click', () => newMatch());
+
+// The ⋯ menu (small / landscape screens only): the game controls collapse into a dropdown so the piste
+// keeps the room. On desktop the button is hidden and the controls sit inline, so this toggle is a no-op.
+const menuBtn = el('menuBtn'), controlsEl = document.querySelector('.controls');
+if (menuBtn && controlsEl) {
+  const setMenu = (open) => { controlsEl.classList.toggle('open', open); menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+  menuBtn.addEventListener('click', (ev) => { ev.stopPropagation(); setMenu(!controlsEl.classList.contains('open')); });
+  controlsEl.addEventListener('click', (ev) => { if (ev.target.closest('button')) setMenu(false); }); // a button acts, then the menu closes
+  el('mode').addEventListener('change', () => setMenu(false));
+  document.addEventListener('pointerdown', (ev) => { if (!controlsEl.contains(ev.target) && ev.target !== menuBtn) setMenu(false); });
+}
 
 // mute toggle (remembered across sessions)
 let startMuted = false; try { startMuted = localStorage.getItem('petanque-muted') === '1'; } catch { /* no storage */ }

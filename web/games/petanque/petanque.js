@@ -126,7 +126,7 @@ function startEnd(starter) {
   clampInto(jack);
   phase = 'aim';
   aim = null;
-  setStrike(0, 0); // fresh end: spin ball back to centre
+  setStrike(0, 0); // fresh end: spin ball back to centre (this also clears any stale aim preview)
   status(`${current === 0 ? 'Your' : "Computer's"} throw — ${boulesLeft[current]} boules left`);
   syncHud();
   maybeAI();
@@ -254,6 +254,7 @@ function afterSettle() {
   if (boulesLeft[0] <= 0 && boulesLeft[1] <= 0) { measure(); return; }
   current = next;
   phase = 'aim';
+  aim = null;
   setStrike(0, 0); // each turn starts from a centred spin ball; the computer sets its own before it throws
   status(`${current === 0 ? 'Your' : "Computer's"} throw — ${boulesLeft[current]} left`);
   syncHud();
@@ -332,22 +333,40 @@ function aimFrom(pos) {
   return { heading, power, dist: d, landing, loft, spin, shot: shotName(strike.vert), arc: flightArc(THROW, landing, loft, spin) };
 }
 
+// Setting up a shot is deliberate: DRAG the piste to set your line + power (the trajectory persists as a
+// preview after you let go), fine-tune spin/lob/roll on the ball, then press LAUNCH to actually throw.
 let aiming = false;
 cv.addEventListener('pointerdown', (ev) => {
   sfx.resume(); // unlock WebAudio on the first user gesture
   if (!humanTurn()) return;
-  aiming = true; aim = aimFrom(renderer.screenToGround(ev.clientX, ev.clientY));
+  aiming = true; aim = aimFrom(renderer.screenToGround(ev.clientX, ev.clientY)); updateLaunch();
   try { cv.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
 });
-cv.addEventListener('pointermove', (ev) => { if (aiming && humanTurn()) aim = aimFrom(renderer.screenToGround(ev.clientX, ev.clientY)); });
-function releaseThrow() {
+cv.addEventListener('pointermove', (ev) => { if (aiming && humanTurn()) { aim = aimFrom(renderer.screenToGround(ev.clientX, ev.clientY)); updateLaunch(); } });
+function endAim() {
   if (!aiming) return;
   aiming = false;
-  const a = aim; aim = null;
-  if (a && humanTurn() && a.power > 0.02) throwTo(a.landing, a.loft, a.spin, current); // too soft = cancel
+  if (aim && aim.power <= 0.02) aim = null; // a tap, not a drag → no trajectory set
+  updateLaunch();
 }
-cv.addEventListener('pointerup', releaseThrow);
-cv.addEventListener('pointercancel', () => { aiming = false; aim = null; });
+cv.addEventListener('pointerup', endAim);
+cv.addEventListener('pointercancel', () => { aiming = false; updateLaunch(); });
+
+// Keep the persisted aim's shape (loft/spin/arc) in step with the spin ball as you adjust it.
+function recomputeAimShape() {
+  if (!aim) return;
+  aim.loft = loftFromVert(strike.vert); aim.spin = strike.side; aim.shot = shotName(strike.vert);
+  aim.arc = flightArc(THROW, aim.landing, aim.loft, aim.spin);
+}
+const launchReady = () => humanTurn() && !!aim && aim.power > 0.02;
+function updateLaunch() { el('launch').classList.toggle('ready', launchReady()); }
+function launch() {
+  if (!launchReady()) return;
+  sfx.resume();
+  const a = aim; aim = null; updateLaunch();
+  throwTo(a.landing, a.loft, a.spin, current);
+}
+el('launch').addEventListener('click', launch);
 
 // --- loop -----------------------------------------------------------------------------------------
 // Physics still runs in 2D plan coords; the WebGL renderer draws that state in 3D each frame.
@@ -366,6 +385,7 @@ function frame(ts) {
     }
   }
   // b.airLift is set by the physics step during flight; the renderer reads it for the 3D arc.
+  updateLaunch(); // keep the Launch button in step with turn/aim state
   renderer.frame({ jack, bodies, aim, aiming, humanTurn, phase, impacts, measure: measureInfo }, d);
   requestAnimationFrame(frame);
 }
@@ -418,7 +438,7 @@ function syncShot() {
 function setStrike(side, vert) {
   const m = Math.hypot(side, vert); if (m > 1) { side /= m; vert /= m; } // clamp the contact point to the ball's edge
   strike = { side, vert };
-  drawSpinBall(); syncShot();
+  drawSpinBall(); syncShot(); recomputeAimShape();
 }
 function sbFrom(ev) {
   if (!humanTurn()) return; // can't set spin on the computer's turn — the ball shows ITS pick then

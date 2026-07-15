@@ -131,7 +131,8 @@ test('Pétanque boots, a throw runs the gravel physics and settles cleanly', asy
   assert.ok(await open('web/games/petanque/index.html', `!!document.getElementById('piste') && !!document.getElementById('status')`), 'canvas did not render');
   assert.deepEqual(jsErrors, [], `console errors on load:\n${jsErrors.join('\n')}`);
 
-  // It's your throw on load — DRAG out from the throwing circle (drag direction = line, length = power).
+  // It's your throw on load. Setting up a shot is deliberate: DRAG out from the throwing circle to set the
+  // line + power (this only ARMS the shot — it persists as a preview), then press LAUNCH to actually throw.
   await evaluate(`(()=>{
     const c=document.getElementById('piste'); const r=c.getBoundingClientRect();
     const cx=r.left+r.width*0.5, cy=r.top+r.height*0.907;   // throwing circle (bottom-centre)
@@ -141,7 +142,11 @@ test('Pétanque boots, a throw runs the gravel physics and settles cleanly', asy
     c.dispatchEvent(new PointerEvent('pointermove',{clientX:tx, clientY:ty, ...p}));
     c.dispatchEvent(new PointerEvent('pointerup',  {clientX:tx, clientY:ty, ...p}));
   })()`);
-  assert.ok(await waitFor(`document.querySelectorAll('#dots-you .bd.spent').length >= 1`, { timeout: 6000 }), 'the throw did not register (no spent boule)');
+  // the drag arms the shot but must NOT throw on its own — Launch becomes ready, no boule spent yet
+  assert.ok(await waitFor(`document.getElementById('launch').classList.contains('ready')`, { timeout: 3000 }), 'Launch did not arm after aiming');
+  assert.equal(await evaluate(`document.querySelectorAll('#dots-you .bd.spent').length`), 0, 'a drag alone must not throw — only Launch does');
+  await evaluate(`document.getElementById('launch').click()`); // fire it
+  assert.ok(await waitFor(`document.querySelectorAll('#dots-you .bd.spent').length >= 1`, { timeout: 6000 }), 'the throw did not register (no spent boule) after Launch');
 
   await sleep(2500); // fly → land → roll → settle, and let the AI reply
   assert.deepEqual(jsErrors, [], `console errors after a throw:\n${jsErrors.join('\n')}`);

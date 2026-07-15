@@ -564,7 +564,7 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
   function drawOverlay(state, r) {
     octx.clearRect(0, 0, overlay.width, overlay.height);
     if (state.measure) { drawMeasure(state, r); return; }
-    if (!(state.aim && state.aiming && state.humanTurn())) return;
+    if (!(state.aim && state.humanTurn())) return; // the aim persists after the drag, until you Launch
     const a = state.aim, L = a.landing;
     const ts = worldToScreen(THROW.x, THROW.y, 0, r), ls = worldToScreen(L.x, L.y, 0, r);
 

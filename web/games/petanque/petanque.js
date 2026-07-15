@@ -48,15 +48,27 @@ function flightArc(from, to, loft, spin, n = 26) {
   return pts;
 }
 
-// Up to four players. Each has BOTH a colour and a distinct pattern stamped on the boule (circle,
-// double-circle, square, triangle) so colour-blind players can tell boules apart by shape alone. GLYPH
-// mirrors the pattern in the HUD/status text.
+// Up to four players. Each boule has BOTH a colour and a distinct FINISH — one band, two bands, smooth,
+// or dotted (lawn-bowls style) — so players are told apart by look alone, not colour. The HUD shows a
+// matching mini-ball swatch (patSwatch below).
 const TEAM = [
-  { name: 'Blue',  pattern: 'circle',   glyph: '●', fill: ['#dcecff', '#5a86dd', '#31509a'] },
-  { name: 'Red',   pattern: 'double',   glyph: '◎', fill: ['#ffd9cb', '#d86a4f', '#9a3b2a'] },
-  { name: 'Green', pattern: 'square',   glyph: '■', fill: ['#cdead0', '#57ab5e', '#2f6a35'] },
-  { name: 'Amber', pattern: 'triangle', glyph: '▲', fill: ['#ffe9c2', '#e0a93a', '#946a16'] },
+  { name: 'Blue',  pattern: 'band1',  fill: ['#dcecff', '#5a86dd', '#31509a'] },
+  { name: 'Red',   pattern: 'band2',  fill: ['#ffd9cb', '#d86a4f', '#9a3b2a'] },
+  { name: 'Green', pattern: 'smooth', fill: ['#cdead0', '#57ab5e', '#2f6a35'] },
+  { name: 'Amber', pattern: 'dots',   fill: ['#ffe9c2', '#e0a93a', '#946a16'] },
 ];
+// A tiny inline-SVG boule that mirrors a player's colour + finish, for the HUD chips.
+function patSwatch(i) {
+  const t = TEAM[i], col = t.fill[1], dk = '#12202c';
+  let marks = '';
+  if (t.pattern === 'band1') marks = `<rect x="0" y="6.4" width="16" height="3.2" fill="${dk}"/>`;
+  else if (t.pattern === 'band2') marks = `<rect x="0" y="3.6" width="16" height="2.4" fill="${dk}"/><rect x="0" y="10" width="16" height="2.4" fill="${dk}"/>`;
+  else if (t.pattern === 'dots') marks = [[5, 5], [11, 5], [8, 8], [5, 11], [11, 11]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.6" fill="${dk}"/>`).join('');
+  return `<svg width="16" height="16" viewBox="0 0 16 16" class="pat" aria-hidden="true">`
+    + `<defs><clipPath id="cb${i}"><circle cx="8" cy="8" r="7.2"/></clipPath></defs>`
+    + `<circle cx="8" cy="8" r="7.2" fill="${col}"/><g clip-path="url(#cb${i})">${marks}</g>`
+    + `<circle cx="8" cy="8" r="7.2" fill="none" stroke="rgba(0,0,0,.4)"/></svg>`;
+}
 
 const renderer = createPetanqueRenderer(cv, overlay, { W, H, P, THROW, R, JACK_R, TEAM });
 
@@ -577,7 +589,7 @@ function syncHud() {
       `<span class="bd" style="background:${dotGrad(i)}${k < spent ? ';opacity:.2' : ''}"></span>`).join('');
     const tag = p.kind === 'ai' ? '<span class="ai">AI</span>' : '';
     return `<div class="stat${i === current && phase !== 'over' && phase !== 'measure' ? ' turn' : ''}">`
-      + `<span class="pat" style="color:${TEAM[i].fill[1]}">${TEAM[i].glyph}</span>`
+      + patSwatch(i)
       + `<b>${scores[i]}</b><span class="nm">${playerName(i)}</span>${tag}`
       + `<span class="dotrow">${dots}</span></div>`;
   }).join('');

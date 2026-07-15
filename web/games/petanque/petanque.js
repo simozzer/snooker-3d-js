@@ -121,6 +121,29 @@ const referee = (() => {
     'Ma grand-mère fait du vélo.', 'Le poisson est fatigué.', 'Où sont mes chaussettes ?',
     'Tu danses comme un canard.', 'Mon pantalon est trop petit.', 'Le président mange une baguette.',
     "Je n'aime pas le lundi.", 'Ton chapeau est ridicule.',
+    // 100 more — food, beasts, objects, exclamations, and pure nonsense
+    'Le café.', 'Le vin rouge.', 'La moutarde.', 'Le beurre.', 'La crème.', 'Le pain.', 'La tarte.',
+    'Le gâteau.', 'La confiture.', 'Le chocolat.', 'La brioche.', 'Le poireau.', "L'aubergine.",
+    'La courgette.', 'Le champignon.', 'La cerise.', 'La fraise.', 'Le raisin.', "L'oignon.", "L'ail.",
+    'Le homard.', "L'huître.", 'La truffe.', 'Le cornichon.', 'La ratatouille.',
+    'Le hérisson.', 'Le hibou.', 'La chèvre.', 'Le mouton.', 'Le cheval.', 'La vache.', 'Le cochon.',
+    'La poule.', 'Le coq.', 'Le lapin.', 'La souris.', "L'âne.", 'Le papillon.', "L'abeille.",
+    'Le crapaud.', 'La libellule.',
+    'Le tabouret.', 'La brouette.', 'Le tire-bouchon.', "L'accordéon.", 'La guillotine.', 'Le tricycle.',
+    'La casquette.', 'Les lunettes.', 'Le mouchoir.', 'La valise.', 'Le tournevis.', 'La cuillère.',
+    'Le balai.', "L'oreiller.",
+    'Voilà !', 'Enfin !', 'Hélas !', 'Aïe !', 'Oups !', 'Bravo !', 'Superbe !', 'Épouvantable !',
+    'Splendide !', "Nom d'un chien !", 'Ça alors !', 'Pas mal.', 'Comme ci comme ça.', "N'importe quoi !",
+    'Doucement…', 'Attention !', 'Tant pis.', 'Tant mieux.', 'Et voilà le travail !', 'Chapeau !',
+    'Mon oncle est un fromage.', 'Le canard a volé ma montre.', "J'ai perdu mon éléphant.",
+    'As-tu mangé ma chaussure ?', 'Le fromage me regarde.', 'Pourquoi la lune est carrée ?',
+    'Ma tortue joue du piano.', 'Le facteur danse le tango.', 'Je collectionne les nuages.',
+    "Ton cheval a besoin d'un dentiste.", 'Où est passé mon accordéon ?', 'La soupe est trop bavarde.',
+    'Mon voisin parle aux escargots.', 'Le président a perdu son béret.',
+    'Il y a une grenouille dans ma poche.', 'Ta moustache est magnifique.',
+    'Le train pour Paris est en retard.', "J'ai épousé une baguette.", 'Le chat a mangé le maire.',
+    'Range ta chambre !', 'Ne mange pas le cochonnet !', 'Tu joues comme mon grand-père.',
+    'Encore une catastrophe !', 'La vache regarde le train.', 'Mon chapeau a des opinions.',
   ];
   const node = el('ref');
   let last = -1, hideT = 0, voice = null;
@@ -560,7 +583,9 @@ el('mute').addEventListener('click', () => {
 });
 
 el('build').textContent = `Pétanque · v${VERSION}`;
-mode = 'ai';
+// A shareable link can pick the mode, e.g. ?mode=watch → sit back and watch four AIs play themselves.
+let urlMode = null; try { urlMode = new URLSearchParams(location.search).get('mode'); } catch { /* no URL */ }
+mode = (urlMode && MODES[urlMode]) ? urlMode : 'ai';
 el('mode').value = mode;
 newMatch();
 requestAnimationFrame(frame);

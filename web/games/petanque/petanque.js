@@ -326,36 +326,50 @@ el('mode').addEventListener('click', () => {
 // One steel ball you set the contact point on: up = roll on (follow), down = lob / drop dead (draw),
 // out to the side = hook the flight. It feeds `strike`, which aimFrom turns into loft + spin.
 const sb = el('spinball'), sbx = sb.getContext('2d');
-const SBW = sb.width, SBC = SBW / 2, SBR = SBW / 2 - 7;
+const SBW = sb.width, SBC = SBW / 2, SBR = SBW / 2 - 12;
 function drawSpinBall() {
   sbx.clearRect(0, 0, SBW, SBW);
-  const g = sbx.createRadialGradient(SBC - SBR * 0.36, SBC - SBR * 0.42, SBR * 0.15, SBC, SBC, SBR);
-  g.addColorStop(0, '#eef2f6'); g.addColorStop(0.5, '#9fb0bf'); g.addColorStop(1, '#485664');
+  const g = sbx.createRadialGradient(SBC - SBR * 0.36, SBC - SBR * 0.42, SBR * 0.12, SBC, SBC, SBR);
+  g.addColorStop(0, '#f2f5f8'); g.addColorStop(0.5, '#9fb0bf'); g.addColorStop(1, '#3f4d5a');
   sbx.fillStyle = g; sbx.beginPath(); sbx.arc(SBC, SBC, SBR, 0, 7); sbx.fill();
-  sbx.strokeStyle = 'rgba(0,0,0,.4)'; sbx.lineWidth = 1; sbx.stroke();
-  sbx.strokeStyle = 'rgba(18,28,38,.26)'; // crosshair
+  sbx.strokeStyle = 'rgba(0,0,0,.45)'; sbx.lineWidth = 1.5; sbx.stroke();
+  // reference marks: crosshair + a half-radius ring, so you can gauge how far off-centre the dot sits
+  sbx.strokeStyle = 'rgba(18,28,38,.22)'; sbx.lineWidth = 1;
   sbx.beginPath(); sbx.moveTo(SBC - SBR, SBC); sbx.lineTo(SBC + SBR, SBC); sbx.moveTo(SBC, SBC - SBR); sbx.lineTo(SBC, SBC + SBR); sbx.stroke();
-  sbx.fillStyle = 'rgba(15,25,35,.5)'; sbx.font = '700 8px system-ui, sans-serif'; sbx.textAlign = 'center';
-  sbx.fillText('ROLL', SBC, SBC - SBR + 9); sbx.fillText('LOB', SBC, SBC + SBR - 3);
+  sbx.beginPath(); sbx.arc(SBC, SBC, SBR * 0.5, 0, 7); sbx.stroke();
+  sbx.fillStyle = 'rgba(15,25,35,.5)'; sbx.font = '700 10px system-ui, sans-serif'; sbx.textAlign = 'center';
+  sbx.fillText('ROLL', SBC, SBC - SBR + 12); sbx.fillText('LOB', SBC, SBC + SBR - 4);
   const dx = SBC + strike.side * SBR, dy = SBC - strike.vert * SBR; // contact dot
-  sbx.fillStyle = '#e8663f'; sbx.beginPath(); sbx.arc(dx, dy, 5, 0, 7); sbx.fill();
-  sbx.strokeStyle = 'rgba(255,255,255,.85)'; sbx.lineWidth = 1.5; sbx.stroke();
+  sbx.fillStyle = '#e8663f'; sbx.beginPath(); sbx.arc(dx, dy, 7, 0, 7); sbx.fill();
+  sbx.strokeStyle = 'rgba(255,255,255,.9)'; sbx.lineWidth = 2; sbx.stroke();
 }
 function syncShot() {
   el('shot-name').textContent = shotName(strike.vert);
-  el('shot-sub').textContent = Math.abs(strike.side) < 0.12 ? 'straight' : `hook ${strike.side > 0 ? 'R' : 'L'} ${Math.abs(strike.side).toFixed(2)}`;
+  el('shot-sub').textContent = Math.abs(strike.side) < 0.08 ? 'straight' : `hook ${strike.side > 0 ? 'R' : 'L'} ${Math.abs(strike.side).toFixed(2)}`;
+}
+function setStrike(side, vert) {
+  const m = Math.hypot(side, vert); if (m > 1) { side /= m; vert /= m; } // clamp the contact point to the ball's edge
+  strike = { side, vert };
+  drawSpinBall(); syncShot();
 }
 function sbFrom(ev) {
   const r = sb.getBoundingClientRect();
-  let sx = ((ev.clientX - r.left) * (SBW / r.width) - SBC) / SBR;
-  let sy = -((ev.clientY - r.top) * (SBW / r.height) - SBC) / SBR;
-  const m = Math.hypot(sx, sy); if (m > 1) { sx /= m; sy /= m; } // clamp the contact point to the ball's edge
-  strike = { side: sx, vert: sy };
-  drawSpinBall(); syncShot();
+  setStrike(((ev.clientX - r.left) * (SBW / r.width) - SBC) / SBR, -((ev.clientY - r.top) * (SBW / r.height) - SBC) / SBR);
 }
-sb.addEventListener('pointerdown', (ev) => { try { sb.setPointerCapture(ev.pointerId); } catch { /* ignore */ } sbFrom(ev); });
+sb.addEventListener('pointerdown', (ev) => { sb.focus(); try { sb.setPointerCapture(ev.pointerId); } catch { /* ignore */ } sbFrom(ev); });
 sb.addEventListener('pointermove', (ev) => { if (ev.buttons) sbFrom(ev); });
-sb.addEventListener('dblclick', () => { strike = { side: 0, vert: 0 }; drawSpinBall(); syncShot(); });
+sb.addEventListener('dblclick', () => setStrike(0, 0));
+// arrow keys nudge the contact point for fine adjustment; hold Shift for extra-fine, 0/Home to centre
+sb.addEventListener('keydown', (ev) => {
+  const s = ev.shiftKey ? 0.01 : 0.05;
+  if (ev.key === 'ArrowUp') setStrike(strike.side, strike.vert + s);
+  else if (ev.key === 'ArrowDown') setStrike(strike.side, strike.vert - s);
+  else if (ev.key === 'ArrowRight') setStrike(strike.side + s, strike.vert);
+  else if (ev.key === 'ArrowLeft') setStrike(strike.side - s, strike.vert);
+  else if (ev.key === '0' || ev.key === 'Home') setStrike(0, 0);
+  else return;
+  ev.preventDefault();
+});
 drawSpinBall(); syncShot();
 
 el('measure').addEventListener('click', () => { if (phase === 'aim') measure(); });

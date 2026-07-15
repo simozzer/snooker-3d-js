@@ -37,11 +37,12 @@
     button:hover { filter: brightness(1.08); }
 
     /* shot-setup panel: a snooker-style spin ball — drag the dot for roll/lob + hook */
-    .shot { display: flex; gap: 9px; align-items: center; background: #1b2229; border: 1px solid #2a333d; border-radius: 10px; padding: 4px 9px 4px 5px; }
-    #spinball { width: 44px; height: 44px; touch-action: none; cursor: pointer; }
-    .shotread { display: flex; flex-direction: column; line-height: 1.15; }
-    .shotread b { color: #eaf6ef; font-size: 13px; }
-    .shotread span { color: #7f95a8; font-size: 11px; }
+    .shot { display: flex; gap: 10px; align-items: center; background: #1b2229; border: 1px solid #2a333d; border-radius: 10px; padding: 5px 11px 5px 6px; }
+    #spinball { width: 88px; height: 88px; touch-action: none; cursor: pointer; border-radius: 50%; outline: none; }
+    #spinball:focus-visible { box-shadow: 0 0 0 2px #54c98a; }
+    .shotread { display: flex; flex-direction: column; line-height: 1.2; }
+    .shotread b { color: #eaf6ef; font-size: 14px; }
+    .shotread span { color: #7f95a8; font-size: 11.5px; }
 
     #wrap { position: relative; width: min(94vw, 900px); aspect-ratio: 900 / 560; }
     #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: 12px; }
@@ -63,8 +64,8 @@
   <div class="hud">
     <div class="stat">You <b id="score-you">0</b><span class="dotrow" id="dots-you"></span></div>
     <div class="stat"><span class="dotrow" id="dots-opp"></span><b id="score-opp">0</b> Comp</div>
-    <div class="shot" title="Drag the dot on the boule: up = roll on, down = lob / drop, sides = hook the flight. Double-click to centre.">
-      <canvas id="spinball" width="72" height="72"></canvas>
+    <div class="shot" title="Drag the dot on the boule (or use arrow keys — hold Shift for fine): up = roll on, down = lob / drop, sides = hook the flight. Double-click to centre.">
+      <canvas id="spinball" width="132" height="132" tabindex="0"></canvas>
       <div class="shotread"><b id="shot-name">Pitch</b><span id="shot-sub">straight</span></div>
     </div>
     <button id="mode" class="toggle">vs Computer</button>

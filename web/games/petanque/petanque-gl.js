@@ -537,9 +537,33 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
     drawOverlay(state, r);
   }
 
+  // The measure: string lines from the jack to each counting boule, with distances (pétanque's ritual).
+  function drawMeasure(state, r) {
+    const m = state.measure, col = TEAM[m.winner].fill[1];
+    const js = worldToScreen(state.jack.x, state.jack.y, state.jack.r, r);
+    const pulse = 0.6 + 0.4 * Math.sin(t * 5);
+    octx.lineJoin = 'round'; octx.lineCap = 'round'; octx.textAlign = 'center';
+    // the jack, ringed
+    octx.strokeStyle = 'rgba(255,255,255,.85)'; octx.lineWidth = 2;
+    octx.beginPath(); octx.arc(js.x, js.y, 9, 0, 7); octx.stroke();
+    for (const b of m.boules) {
+      const bs = worldToScreen(b.x, b.y, b.r, r);
+      octx.strokeStyle = col; octx.setLineDash([5, 5]); octx.lineWidth = 2;
+      octx.beginPath(); octx.moveTo(js.x, js.y); octx.lineTo(bs.x, bs.y); octx.stroke(); octx.setLineDash([]);
+      octx.globalAlpha = pulse; octx.lineWidth = 2.5;
+      octx.beginPath(); octx.arc(bs.x, bs.y, 13, 0, 7); octx.stroke(); octx.globalAlpha = 1;
+      const cm = Math.round(Math.hypot(b.x - state.jack.x, b.y - state.jack.y) * 1.6); // plan px → ~cm
+      const mx = (js.x + bs.x) / 2, my = (js.y + bs.y) / 2;
+      octx.font = '700 12px system-ui, sans-serif';
+      octx.fillStyle = 'rgba(0,0,0,.5)'; octx.fillText(`${cm} cm`, mx + 1, my - 5);
+      octx.fillStyle = '#fff'; octx.fillText(`${cm} cm`, mx, my - 6);
+    }
+  }
+
   // 2D aim overlay (projected from 3D so it sits on the piste) ---------------------------------------
   function drawOverlay(state, r) {
     octx.clearRect(0, 0, overlay.width, overlay.height);
+    if (state.measure) { drawMeasure(state, r); return; }
     if (!(state.aim && state.aiming && state.humanTurn())) return;
     const a = state.aim, L = a.landing;
     const ts = worldToScreen(THROW.x, THROW.y, 0, r), ls = worldToScreen(L.x, L.y, 0, r);

@@ -59,6 +59,7 @@ const renderer = createPetanqueRenderer(cv, overlay, { W, H, P, THROW, R, JACK_R
 // --- state ------------------------------------------------------------------------------------------
 let jack, bodies, boulesLeft, scores, current, mode, phase, aim, aiTimer, settleTimer;
 let impacts = [];  // collision events (contact point + strength) drained each frame for shock-rings + shake
+let measureInfo = null;  // during the end's measure: the winner + the boules being counted, for the string overlay
 // The spin ball's contact point (like snooker english): side −1..+1 = hook L/R; vert −1..+1 = lob..roll.
 let strike = { side: 0, vert: 0 };
 const loftFromVert = (v) => clamp(0.5 + v * 0.42, 0.08, 0.95); // draw(down)=lob, follow(up)=roll
@@ -216,21 +217,29 @@ function afterSettle() {
 
 function measure() {
   phase = 'measure';
-  const pts = live().map((b) => ({ team: b.team, d: dist(b, jack) })).sort((a, b) => a.d - b.d);
+  measureInfo = null;
+  const pts = live().map((b) => ({ b, team: b.team, d: dist(b, jack) })).sort((a, b) => a.d - b.d);
   if (!pts.length) { status('No boules counted — dead end.'); setTimeout(() => startEnd(current), 1400); return; }
   const winner = pts[0].team;
   const oppNearest = pts.find((p) => p.team !== winner)?.d ?? Infinity;
-  const points = pts.filter((p) => p.team === winner && p.d < oppNearest).length;
-  scores[winner] += points;
-  syncHud();
-  if (scores[winner] >= 13) {
-    phase = 'over';
-    status(`${winner === 0 ? 'You win the match' : 'Computer wins the match'} ${scores[0]}–${scores[1]} 🎉`);
-    el('status').classList.toggle('win', winner === 0);
-    return;
-  }
-  status(`${winner === 0 ? 'You' : 'Computer'} win${winner === 0 ? '' : 's'} the end +${points}  (${scores[0]}–${scores[1]}). New end…`);
-  setTimeout(() => startEnd(winner), 1800);
+  const counting = pts.filter((p) => p.team === winner && p.d < oppNearest);
+  const points = counting.length;
+  // run the string out from the jack to the counting boules FIRST; award once the measure has been seen
+  measureInfo = { winner, boules: counting.map((p) => p.b) };
+  status(`Measuring…  ${winner === 0 ? 'you' : 'the computer'} for ${points}`);
+  setTimeout(() => {
+    measureInfo = null;
+    scores[winner] += points;
+    syncHud();
+    if (scores[winner] >= 13) {
+      phase = 'over';
+      status(`${winner === 0 ? 'You win the match' : 'Computer wins the match'} ${scores[0]}–${scores[1]} 🎉`);
+      el('status').classList.toggle('win', winner === 0);
+      return;
+    }
+    status(`${winner === 0 ? 'You' : 'Computer'} win${winner === 0 ? '' : 's'} the end +${points}  (${scores[0]}–${scores[1]}). New end…`);
+    setTimeout(() => startEnd(winner), 1700);
+  }, 1800);
 }
 
 // --- simple AI ------------------------------------------------------------------------------------
@@ -310,7 +319,7 @@ function frame(ts) {
     }
   }
   // b.airLift is set by the physics step during flight; the renderer reads it for the 3D arc.
-  renderer.frame({ jack, bodies, aim, aiming, humanTurn, phase, impacts }, d);
+  renderer.frame({ jack, bodies, aim, aiming, humanTurn, phase, impacts, measure: measureInfo }, d);
   requestAnimationFrame(frame);
 }
 

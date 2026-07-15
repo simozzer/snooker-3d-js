@@ -476,6 +476,34 @@ function step(dt) {
   return moving;
 }
 
+// Boules must never come to rest overlapping. A tight pack can freeze mid-overlap (separating A↔B shoves
+// B into C just as speeds die), so at the moment everything settles we relax all overlaps to just-touching:
+// a few iterations of symmetric pairwise circle separation, re-clamped inside the piste each pass. Includes
+// the jack. This converges to a valid packing (many boules can touch, none overlap).
+function deClump() {
+  const items = [jack, ...bodies].filter((b) => !b.dead);
+  for (let iter = 0; iter < 20; iter++) {
+    let overlapped = false;
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i], c = items[j];
+        const dx = c.x - a.x, dy = c.y - a.y, min = a.r + c.r;
+        let d = Math.hypot(dx, dy);
+        if (d < min - 0.01) {
+          let nx, ny;
+          if (d < 1e-3) { nx = 1; ny = 0; d = 0; } // exactly coincident → split along x
+          else { nx = dx / d; ny = dy / d; }
+          const push = (min - d) / 2;
+          a.x -= nx * push; a.y -= ny * push; c.x += nx * push; c.y += ny * push;
+          overlapped = true;
+        }
+      }
+    }
+    for (const b of items) clampInto(b); // a shove mustn't put a boule off the piste
+    if (!overlapped) break;
+  }
+}
+
 // --- turn flow ------------------------------------------------------------------------------------
 // Distance of a player's CLOSEST boule to the jack (Infinity if they have none down yet).
 function nearestDistOf(pi) {
@@ -639,6 +667,7 @@ function frame(ts) {
         if (b.state === 'air') { b.x = b.to.x; b.y = b.to.y; b.airLift = 0; } // drop any stuck-airborne boule (safety timeout) to its target
         b.state = 'rest'; b.vx = b.vy = 0;
       });
+      deClump(); // never leave boules frozen on top of one another
       simTime = 0; acc = 0;
       phase = 'settling';
       clearTimeout(settleTimer);

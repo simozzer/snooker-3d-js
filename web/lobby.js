@@ -29,6 +29,15 @@ const GAME_META = {
 const meta = (key) => GAME_META[key] || { icon: '🎮', label: key };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Community display name: first name + the first two letters of the surname (e.g. "Jane Do"). Mirrors
+// server/roster.js exactly so our own row still highlights; falls back to the full name/username.
+const communityName = (first, last, fallback) => {
+  const f = (first && first.trim()) || '';
+  const l = (last && last.trim()) || '';
+  if (f && l) return `${f} ${l.slice(0, 2)}`;
+  return f || (fallback && String(fallback).trim()) || null;
+};
+
 // --- multiplayer reachability light (bottom-left, matches the other pages) ----------------------
 const netstat = el('netstat');
 function setNetStat(state, label) {
@@ -42,7 +51,8 @@ setNetStat('connecting', 'Connecting…');
 // If the viewer is signed in (here or on any other compendium page — the token is shared in
 // sessionStorage), we authenticate the relay so they appear in "online now" and their own rows glow.
 const auth = createAuth(AUTH);
-let myName = null; // our display name once authenticated, for highlighting
+let myName = null;  // our full login name — matches the score tables (recorded from the token)
+let myShort = null; // our Community roster name (first + surname initials) — matches the members list
 function updateAuthUI() {
   if (!auth.enabled) { el('authbar').style.display = 'none'; el('join').classList.remove('show'); return; }
   const user = auth.getUser();
@@ -79,7 +89,11 @@ async function boot() {
     if (auth.enabled) {
       const token = await auth.getAccessToken();
       const user = auth.getUser();
-      if (token) { myName = user?.name ?? null; try { await relay.authenticate(token); } catch { /* anon is fine */ } }
+      if (token) {
+        myName = user?.name ?? null;
+        myShort = communityName(user?.given_name, user?.family_name, user?.name);
+        try { await relay.authenticate(token); } catch { /* anon is fine */ }
+      }
     }
     refreshAll();
   } catch {
@@ -116,7 +130,7 @@ function renderMembers(m) {
     return;
   }
   people.innerHTML = members.map((u) => {
-    const isMe = myName && u.name.toLowerCase() === myName.toLowerCase();
+    const isMe = myShort && u.name.toLowerCase() === myShort.toLowerCase();
     const dot = u.online ? `<span class="live-dot"></span>` : `<span class="off-dot"></span>`;
     const badge = u.online && u.playing
       ? `<span class="badge">${meta(u.playing).icon} ${esc(meta(u.playing).label)}</span>`

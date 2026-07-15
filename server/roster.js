@@ -1,17 +1,28 @@
 // roster.js — OPTIONAL registered-user roster from Keycloak's admin API. When configured with a
 // service-account client (client_credentials grant + the `view-users` role on the realm), the relay
 // can list everyone who has an ACCOUNT — not just who's online, and not just who's played a game — so
-// the Community page can show the whole membership by first name.
+// the Community page can show the whole membership by first name + two surname initials.
 //
 // It is deliberately OPTIONAL and secret-free by default: with no KC_ROSTER_* env the roster is
 // disabled and the relay behaves exactly as before (mirrors auth.js). The client secret lives only in
-// this server process's environment — never in the browser bundle, never on the CDN. Only FIRST NAMES
-// (falling back to username) ever leave this module; the OIDC `sub` is kept internal for correlation.
+// this server process's environment — never in the browser bundle, never on the CDN. Only a first name
+// plus the first two letters of the surname (falling back to username) ever leave this module — never a
+// full surname; the OIDC `sub` is kept internal for correlation.
 //
 // Resilience: the user list is cached and refreshed on a TTL. A transient Keycloak blip serves the
 // last good cache (stale-ok) rather than blanking the page, and failures back off so we don't hammer.
 
 const FIVE_MIN = 5 * 60 * 1000;
+
+// Community display name: the first name plus the first two letters of the surname (e.g. "Jane Do"),
+// so members are distinguishable on the Community page without exposing full surnames. Falls back to
+// the username when there's no first name. Exported so the client can format identically (see lobby.js).
+export function communityName(first, last, username) {
+  const f = (first && String(first).trim()) || '';
+  const l = (last && String(last).trim()) || '';
+  if (f && l) return `${f} ${l.slice(0, 2)}`;
+  return f || (username && String(username).trim()) || null;
+}
 
 export function createRoster({
   base = null,            // Keycloak base incl. context path, e.g. http://10.43.180.247:8080/auth
@@ -60,7 +71,7 @@ export function createRoster({
   async function fetchUsers() {
     const at = await token();
     // With a group configured, list only its members (so registered-but-not-a-player accounts stay
-    // out of the roster); otherwise the whole realm. `briefRepresentation` still carries firstName.
+    // out of the roster); otherwise the whole realm. `briefRepresentation` carries firstName + lastName.
     let url;
     if (group) {
       if (!groupId) groupId = await resolveGroupId(at);
@@ -71,10 +82,10 @@ export function createRoster({
     const res = await fetchImpl(url, { headers: { authorization: `Bearer ${at}` } });
     if (!res.ok) throw new Error(`${group ? 'members' : 'users'} ${res.status}`);
     const arr = await res.json();
-    // First name only (fall back to username); skip disabled accounts. Nothing else is retained.
+    // First name + two surname initials (fall back to username); skip disabled accounts.
     return (Array.isArray(arr) ? arr : [])
       .filter((u) => u && u.enabled !== false && (u.firstName || u.username))
-      .map((u) => ({ sub: u.id, name: (u.firstName && u.firstName.trim()) || u.username, username: u.username || null }));
+      .map((u) => ({ sub: u.id, name: communityName(u.firstName, u.lastName, u.username), username: u.username || null }));
   }
 
   async function refresh() {

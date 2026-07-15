@@ -116,7 +116,7 @@ export function createAuth(config = {}, deps = {}) {
     const t = tokens();
     const claims = t?.id_token ? decodeJwt(t.id_token) : null;
     if (!claims) return null;
-    return { sub: claims.sub, name: claims.name || claims.preferred_username || claims.email || 'player', email: claims.email ?? null, picture: claims.picture ?? null };
+    return { sub: claims.sub, name: claims.name || claims.preferred_username || claims.email || 'player', given_name: claims.given_name ?? null, family_name: claims.family_name ?? null, email: claims.email ?? null, picture: claims.picture ?? null };
   }
 
   // The token the relay needs. Refreshes silently when it's within 30s of expiry.

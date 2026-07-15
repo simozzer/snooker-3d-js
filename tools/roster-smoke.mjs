@@ -1,5 +1,5 @@
 // roster-smoke.mjs — unit test for server/roster.js against a MOCK Keycloak (an injected fetch). No
-// live server, no secrets. Proves: client_credentials → admin users call, first-name-only mapping,
+// live server, no secrets. Proves: client_credentials → admin users call, first-name + surname-initials mapping,
 // TTL caching, and stale-cache-on-error (a Keycloak blip never blanks the roster).
 //   node --test tools/roster-smoke.mjs
 
@@ -38,17 +38,18 @@ test('disabled without full config — returns [] and never calls out', async ()
   assert.equal(called, false);
 });
 
-test('lists first names (fallback to username), skips disabled accounts', async () => {
+test('lists first name + two surname initials (fallback to username), skips disabled accounts', async () => {
   const { fetchImpl } = mockKeycloak([
-    { id: 'a', firstName: 'Simon', username: 'simon' },
-    { id: 'b', firstName: '  Marie ', username: 'marie99' },   // trimmed
-    { id: 'c', firstName: '', username: 'pierre' },            // falls back to username
-    { id: 'd', firstName: 'Ghost', username: 'ghost', enabled: false }, // skipped
+    { id: 'a', firstName: 'Simon', lastName: 'Moscrop', username: 'simon' }, // "Simon Mo"
+    { id: 'b', firstName: '  Marie ', lastName: ' Curie ', username: 'marie99' }, // trimmed → "Marie Cu"
+    { id: 'c', firstName: 'Prince', username: 'prince' },       // no surname → first name only
+    { id: 'e', firstName: '', username: 'pierre' },             // no first name → falls back to username
+    { id: 'd', firstName: 'Ghost', lastName: 'Ly', username: 'ghost', enabled: false }, // skipped
   ]);
   const r = createRoster({ ...CFG, fetchImpl });
   const list = await r.list();
-  assert.deepEqual(list.map((u) => u.name), ['Simon', 'Marie', 'pierre']);
-  assert.deepEqual(list.map((u) => u.sub), ['a', 'b', 'c'], 'keeps sub internally for correlation');
+  assert.deepEqual(list.map((u) => u.name), ['Simon Mo', 'Marie Cu', 'Prince', 'pierre']);
+  assert.deepEqual(list.map((u) => u.sub), ['a', 'b', 'c', 'e'], 'keeps sub internally for correlation');
 });
 
 test('caches within TTL, refreshes after it', async () => {

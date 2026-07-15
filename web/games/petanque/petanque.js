@@ -237,6 +237,7 @@ const MODES = {
 
 // --- state ------------------------------------------------------------------------------------------
 let jack, bodies, boulesLeft, scores, current, mode, phase, aim, aiTimer, settleTimer;
+let seq = 0; // turn token — bumped on every turn/phase change so stale timers (AI think/throw) become no-ops
 let players = [], perPlayer = 3;
 const humanCount = () => players.filter((p) => p.kind === 'human').length;
 const playerName = (i) => (players[i].kind === 'human' && humanCount() === 1 && i === 0 ? 'You' : TEAM[i].name);
@@ -251,6 +252,7 @@ const shotName = (v) => (v > 0.34 ? 'Roll' : v < -0.34 ? 'Lob' : 'Pitch');
 // phase: 'aim' (human to throw) | 'sim' (physics running) | 'measure' | 'over'
 
 function newMatch() {
+  seq++; clearTimeout(aiTimer); clearTimeout(settleTimer); // kill any in-flight timers from the old match
   mode = mode || 'ai';
   players = (MODES[mode] || MODES.ai).map((kind) => ({ kind }));
   perPlayer = players.length <= 2 ? 3 : 2; // singles gets 3 boules; a crowded 3–4 player end gets 2 each
@@ -260,6 +262,7 @@ function newMatch() {
 }
 
 function startEnd(starter) {
+  seq++; clearTimeout(aiTimer); // fresh end: invalidate any pending AI think/throw
   bodies = [];
   boulesLeft = players.map(() => perPlayer);
   current = starter;
@@ -292,7 +295,9 @@ function holdingTeam() {
 // --- throwing -------------------------------------------------------------------------------------
 // loft: 0 (high lob) .. 1 (flat roll); spin: -1..+1 (banana curve + landing hook).
 function throwTo(landing, loft, spin, team) {
+  if (phase !== 'aim') return;   // a boule can only leave from the aim phase — blocks any double / stale throw
   if (boulesLeft[team] <= 0) return;
+  seq++;                          // this move consumes the turn: any other pending timer is now void
   // A hand is not a ruler: jitter the intended landing (line + distance) before the boule even leaves.
   // Applies to YOU and the computer alike, so aiming is judgement, not pixel-picking.
   const a0 = Math.atan2(landing.y - THROW.y, landing.x - THROW.x), d0 = dist(THROW, landing);
@@ -330,7 +335,7 @@ function land(b) {
   b.vx = Math.cos(kickAng) * kickSpd;
   b.vy = Math.sin(kickAng) * kickSpd;
   sfx.thud();
-  if (Math.random() < 0.3) referee.announce(); // the French ref only pipes up ~30% of landings
+  if (Math.random() < 0.5) referee.announce(); // the French ref pipes up on about half the landings
 }
 
 // --- physics --------------------------------------------------------------------------------------
@@ -410,6 +415,7 @@ function nextThrower() {
 }
 
 function afterSettle() {
+  seq++; clearTimeout(aiTimer); // new turn: cancel anything left over so exactly one throw can happen
   const next = nextThrower();
   if (next === -1) { measure(); return; }
   current = next;
@@ -422,6 +428,7 @@ function afterSettle() {
 }
 
 function measure() {
+  seq++; clearTimeout(aiTimer); // no AI throws during the measure
   phase = 'measure';
   measureInfo = null;
   const pts = live().map((b) => ({ b, team: b.team, d: dist(b, jack) })).sort((a, b) => a.d - b.d);
@@ -457,9 +464,9 @@ const isAI = (i) => players[i] && players[i].kind === 'ai';
 function maybeAI() {
   clearTimeout(aiTimer);
   if (phase !== 'aim' || !isAI(current)) return;
-  const me = current;
+  const me = current, mySeq = seq; // this exact turn; if seq moves on, our timers no-op
   aiTimer = setTimeout(() => {
-    if (phase !== 'aim' || current !== me || !isAI(me)) return;
+    if (seq !== mySeq || phase !== 'aim' || current !== me) return;
     // If someone else holds the point with a boule hugging the jack, sometimes shoot it; else point at the jack.
     const rival = live().filter((b) => b.team !== me).sort((a, b) => dist(a, jack) - dist(b, jack))[0];
     let target, loft, spin;
@@ -471,7 +478,7 @@ function maybeAI() {
     }
     // show the AI setting its shot on the spin ball, then throw a beat later so you can see it
     setStrike(spin, vertFromLoft(loft));
-    aiTimer = setTimeout(() => { if (phase === 'aim' && current === me && isAI(me)) throwTo(reachable(target), loft, spin, me); }, 520);
+    aiTimer = setTimeout(() => { if (seq === mySeq && phase === 'aim' && current === me) throwTo(reachable(target), loft, spin, me); }, 520);
   }, 900);
 }
 
@@ -543,7 +550,10 @@ function frame(ts) {
     acc += d; simTime += d; let moving = false;
     while (acc >= 1 / 120) { moving = step(1 / 120) || moving; acc -= 1 / 120; }
     if (!moving || simTime > 7) { // settled (or safety timeout)
-      [jack, ...bodies].forEach((b) => { if (b.state !== 'air') { b.state = 'rest'; b.vx = b.vy = 0; } });
+      [jack, ...bodies].forEach((b) => {
+        if (b.state === 'air') { b.x = b.to.x; b.y = b.to.y; b.airLift = 0; } // drop any stuck-airborne boule (safety timeout) to its target
+        b.state = 'rest'; b.vx = b.vy = 0;
+      });
       simTime = 0; acc = 0;
       // hold the next move until the current one has had at least ~1.5s to play out (fixes rushed/stalled
       // transitions between moves); normal throws already exceed this, so it only paces the very quick ones.

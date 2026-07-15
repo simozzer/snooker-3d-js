@@ -195,14 +195,18 @@ const referee = (() => {
     { fr: "J'ai appris à lire aux poissons.", en: 'I taught fish to read.' }, { fr: 'Le vent me demande la permission.', en: 'The wind asks my permission.' },
   ];
   const node = el('ref'), sub = el('subtitle');
-  let last = -1, hideT = 0, voice = null;
-  const loadVoice = () => { try { voice = speechSynthesis.getVoices().find((v) => /^fr/i.test(v.lang)) || null; } catch { /* none */ } };
-  try { loadVoice(); if (speechSynthesis.onvoiceschanged !== undefined) speechSynthesis.onvoiceschanged = loadVoice; } catch { /* no TTS */ }
+  let last = -1, hideT = 0, voices = [];
+  // Grab EVERY French voice the device offers (fr-FR, fr-CA…, male/female) — the set varies by OS/browser.
+  const loadVoices = () => { try { voices = speechSynthesis.getVoices().filter((v) => /^fr/i.test(v.lang)); } catch { /* none */ } };
+  try { loadVoices(); if (speechSynthesis.onvoiceschanged !== undefined) speechSynthesis.onvoiceschanged = loadVoices; } catch { /* no TTS */ }
   function speak(text) {
     if (sfx.muted) return;
     try {
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'fr-FR'; if (voice) u.voice = voice; u.rate = 0.95; u.pitch = 1.12;
+      u.lang = 'fr-FR';
+      if (voices.length) u.voice = voices[(Math.random() * voices.length) | 0]; // random French voice each time
+      u.pitch = 0.7 + Math.random() * 0.7;   // vary pitch → different ages / genders
+      u.rate = 0.85 + Math.random() * 0.35;  // vary tempo → different characters
       speechSynthesis.cancel(); speechSynthesis.speak(u);
     } catch { /* no TTS */ }
   }

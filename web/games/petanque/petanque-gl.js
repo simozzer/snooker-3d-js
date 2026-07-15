@@ -112,13 +112,33 @@ function tex(gl, src) {
 // ---- procedural canvases (textures) ----------------------------------------------------------------
 function cvs(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 
+// Gravel piste. Rendered at high resolution with per-stone RELIEF — each pebble gets a drop shadow
+// (down-right), a coloured body, and a top-left highlight, lit to match the scene light — so up close
+// (the overhead pan) it reads as real 3D grit rather than flat speckle. Tiles seamlessly (REPEAT), and
+// with thousands of randomly-placed stones the repeat isn't legible as a pattern.
 function gravelTex() {
-  const c = cvs(512, 512), g = c.getContext('2d');
-  g.fillStyle = '#b49566'; g.fillRect(0, 0, 512, 512);
-  for (let i = 0; i < 14000; i++) {
-    const x = Math.random() * 512, y = Math.random() * 512, s = Math.random() * 3 + 0.5, t = Math.random();
-    g.fillStyle = t < 0.5 ? 'rgba(84,66,40,.4)' : t < 0.8 ? 'rgba(150,126,90,.5)' : 'rgba(230,214,182,.55)';
+  const S = 1024, c = cvs(S, S), g = c.getContext('2d');
+  g.fillStyle = '#ab8c5e'; g.fillRect(0, 0, S, S);
+  // a scatter of stones in four size/tone classes, densest at the small end
+  const stones = 16000;
+  for (let i = 0; i < stones; i++) {
+    const x = Math.random() * S, y = Math.random() * S, t = Math.random();
+    const s = t < 0.7 ? 0.7 + Math.random() * 1.6 : t < 0.93 ? 2 + Math.random() * 2.4 : 3.5 + Math.random() * 3;
+    const u = Math.random();
+    const body = u < 0.4 ? [96, 78, 50] : u < 0.72 ? [156, 132, 95] : u < 0.9 ? [212, 194, 158] : [66, 50, 32];
+    g.fillStyle = 'rgba(38,28,16,0.33)';                          // shadow, offset toward the light-away corner
+    g.beginPath(); g.arc(x + s * 0.45, y + s * 0.5, s, 0, 7); g.fill();
+    g.fillStyle = `rgb(${body[0]},${body[1]},${body[2]})`;        // the stone
     g.beginPath(); g.arc(x, y, s, 0, 7); g.fill();
+    if (s > 1.6) {                                                // catch-light on bigger stones (top-left)
+      g.fillStyle = 'rgba(255,247,226,0.5)';
+      g.beginPath(); g.arc(x - s * 0.34, y - s * 0.34, s * 0.4, 0, 7); g.fill();
+    }
+  }
+  // fine sand grain between the stones
+  for (let i = 0; i < 26000; i++) { const x = Math.random() * S, y = Math.random() * S;
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(255,240,210,0.09)' : 'rgba(52,40,24,0.11)';
+    g.fillRect(x, y, 1, 1);
   }
   return c;
 }
@@ -343,7 +363,7 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
     backdrop: tex(gl, backdropTex()), glow: tex(gl, softDisc('255,255,255')),
     dust: tex(gl, softDisc('176,150,104')),
     boule: TEAM.map((t) => tex(gl, bouleTex(t.fill[1], t.pattern))), // one textured skin per player (colour + pattern)
-    jack: tex(gl, bouleTex('#d8b45a')), ring: tex(gl, ringTex()),    // the jack carries no player emblem
+    jack: tex(gl, bouleTex('#e8481f')), ring: tex(gl, ringTex()),    // bright cochonnet red-orange — pops off the tan gravel; no player emblem
   };
 
   // transient particles: flight trails behind airborne boules, landing-dust puffs, impact shock-rings
@@ -594,10 +614,43 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
     }
   }
 
+  // During the between-shots bird's-eye, call the two boules lying nearest the jack and print their
+  // distances — the leader ringed gold — so you can read who's holding before the next throw. Tied to the
+  // camera blend `over`, so the labels fade in as we rise and fade out as we drop back to the play view.
+  function drawNearest(state, r) {
+    if (over < 0.12) return;
+    const ranked = state.bodies.filter((b) => !b.dead)
+      .map((b) => ({ b, d: Math.hypot(b.x - state.jack.x, b.y - state.jack.y) }))
+      .sort((p, q) => p.d - q.d).slice(0, 2);
+    if (!ranked.length) return;
+    const js = worldToScreen(state.jack.x, state.jack.y, state.jack.r, r);
+    octx.save();
+    octx.globalAlpha = Math.min(1, (over - 0.12) / 0.4);
+    octx.textAlign = 'center'; octx.lineJoin = 'round'; octx.lineCap = 'round';
+    octx.strokeStyle = 'rgba(255,255,255,.9)'; octx.lineWidth = 2;
+    octx.beginPath(); octx.arc(js.x, js.y, 7, 0, 7); octx.stroke(); // the jack
+    ranked.forEach((p, i) => {
+      const bs = worldToScreen(p.b.x, p.b.y, p.b.r, r), col = TEAM[p.b.team].fill[1];
+      octx.strokeStyle = col; octx.setLineDash([5, 5]); octx.lineWidth = 2;
+      octx.beginPath(); octx.moveTo(js.x, js.y); octx.lineTo(bs.x, bs.y); octx.stroke(); octx.setLineDash([]);
+      octx.strokeStyle = i === 0 ? '#ffe07a' : 'rgba(255,255,255,.85)'; octx.lineWidth = i === 0 ? 3 : 2;
+      octx.beginPath(); octx.arc(bs.x, bs.y, 15, 0, 7); octx.stroke(); // ring the boule
+      // distance label, pushed outward past the boule (away from the jack) so the two don't collide
+      const dx = bs.x - js.x, dy = bs.y - js.y, dl = Math.hypot(dx, dy) || 1;
+      const lx = bs.x + dx / dl * 26, ly = bs.y + dy / dl * 26;
+      const label = `${(p.d * 1.6).toFixed(1)} cm`; // plan px → ~cm, one decimal to split near-ties
+      octx.font = i === 0 ? '800 15px system-ui, sans-serif' : '700 13px system-ui, sans-serif';
+      octx.fillStyle = 'rgba(0,0,0,.6)'; octx.fillText(label, lx + 1, ly + 1);
+      octx.fillStyle = i === 0 ? '#ffe07a' : '#fff'; octx.fillText(label, lx, ly);
+    });
+    octx.restore();
+  }
+
   // 2D aim overlay (projected from 3D so it sits on the piste) ---------------------------------------
   function drawOverlay(state, r) {
     octx.clearRect(0, 0, overlay.width, overlay.height);
     if (state.measure) { drawMeasure(state, r); return; }
+    drawNearest(state, r); // distances of the 2 closest boules, during the overhead pan
     if (!(state.aim && state.humanTurn())) return; // the aim persists after the drag, until you Launch
     const a = state.aim, L = a.landing;
     const ts = worldToScreen(THROW.x, THROW.y, 0, r), ls = worldToScreen(L.x, L.y, 0, r);

@@ -275,23 +275,57 @@ const referee = (() => {
     { fr: 'Précision chirurgicale… de bûcheron.', en: 'Surgical precision… for a lumberjack.' }, { fr: "Bien joué. Enfin, 'joué'.", en: "Well played. Well, 'played'." },
     { fr: "Tu progresses. Vers l'arrière.", en: "You're improving. Backwards." }, { fr: 'Napoléon serait fier. Ou pas.', en: 'Napoleon would be proud. Or not.' },
   ];
+  // Every so often the ref drops the French entirely and BARKS a guttural German command instead — short,
+  // shouted, all-caps. (~1 in 4 announcements.) Stored already upper-cased; spoken low-pitched and brisk.
+  const GER = [
+    { de: 'ACHTUNG!', en: 'Attention!' }, { de: 'VOLLTREFFER!', en: 'Direct hit!' }, { de: 'DANEBEN!', en: 'Missed!' },
+    { de: 'DONNERWETTER!', en: 'My word!' }, { de: 'JAWOHL!', en: 'Yes indeed!' }, { de: 'SCHNELLER!', en: 'Faster!' },
+    { de: 'UNGLAUBLICH!', en: 'Unbelievable!' }, { de: 'KATASTROPHE!', en: 'Catastrophe!' }, { de: 'WUNDERBAR!', en: 'Wonderful!' },
+    { de: 'AUSGEZEICHNET!', en: 'Excellent!' }, { de: 'NEIN, NEIN, NEIN!', en: 'No, no, no!' }, { de: 'SO EIN MIST!', en: 'What rubbish!' },
+    { de: 'HIMMEL NOCH MAL!', en: 'Good grief!' }, { de: 'ZACK, ZACK!', en: 'Chop chop!' }, { de: 'MEIN GOTT!', en: 'My God!' },
+    { de: 'HERRLICH!', en: 'Glorious!' }, { de: 'PERFEKT!', en: 'Perfect!' }, { de: 'DUMMKOPF!', en: 'Blockhead!' },
+    { de: 'NOCH EINMAL!', en: 'Once more!' }, { de: 'HALT!', en: 'Stop!' }, { de: 'FURCHTBAR!', en: 'Dreadful!' },
+    { de: 'GANZ SCHLECHT!', en: 'Very bad!' }, { de: 'BRAVO, MEISTER!', en: 'Bravo, master!' }, { de: 'WAS IST DAS?!', en: 'What is that?!' },
+    { de: 'GENAU!', en: 'Exactly!' }, { de: 'FANTASTISCH!', en: 'Fantastic!' }, { de: 'RAUS DAMIT!', en: 'Out with it!' },
+    { de: 'SITZT!', en: "That's got it!" }, { de: 'ENDLICH!', en: 'Finally!' }, { de: 'HOPPLA!', en: 'Whoops!' },
+  ];
   const node = el('ref'), sub = el('subtitle');
-  let last = -1, hideT = 0, voices = [];
-  // Grab EVERY French voice the device offers (fr-FR, fr-CA…, male/female) — the set varies by OS/browser.
-  const loadVoices = () => { try { voices = speechSynthesis.getVoices().filter((v) => /^fr/i.test(v.lang)); } catch { /* none */ } };
+  let last = -1, lastG = -1, hideT = 0, frVoices = [], deVoices = [];
+  // Grab the French AND German voices the device offers (the set varies by OS/browser).
+  const loadVoices = () => { try { const all = speechSynthesis.getVoices();
+    frVoices = all.filter((v) => /^fr/i.test(v.lang)); deVoices = all.filter((v) => /^de/i.test(v.lang));
+  } catch { /* none */ } };
   try { loadVoices(); if (speechSynthesis.onvoiceschanged !== undefined) speechSynthesis.onvoiceschanged = loadVoices; } catch { /* no TTS */ }
-  function speak(text) {
+  function speak(text, { german = false } = {}) {
     if (sfx.muted) return;
     try {
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'fr-FR';
-      if (voices.length) u.voice = voices[(Math.random() * voices.length) | 0]; // random French voice each time
-      u.pitch = 0.7 + Math.random() * 0.7;   // vary pitch → different ages / genders
-      u.rate = 0.85 + Math.random() * 0.35;  // vary tempo → different characters
+      u.lang = german ? 'de-DE' : 'fr-FR';
+      const pool = german ? deVoices : frVoices;
+      if (pool.length) u.voice = pool[(Math.random() * pool.length) | 0];
+      if (german) {                            // shouted + guttural: low pitch, brisk, full volume
+        u.pitch = 0.3 + Math.random() * 0.3;
+        u.rate = 1.0 + Math.random() * 0.25;
+        u.volume = 1;
+      } else {
+        u.pitch = 0.7 + Math.random() * 0.7;   // vary pitch → different ages / genders
+        u.rate = 0.85 + Math.random() * 0.35;  // vary tempo → different characters
+      }
       speechSynthesis.cancel(); speechSynthesis.speak(u);
     } catch { /* no TTS */ }
   }
   function announce() {
+    clearTimeout(hideT);
+    if (Math.random() < 0.25) {                 // ~1 in 4: a shouted German bark
+      let i; do { i = Math.floor(Math.random() * GER.length); } while (i === lastG && GER.length > 1);
+      lastG = i;
+      node.innerHTML = `<span class="flag">🇩🇪</span>${GER[i].de}`;
+      node.classList.add('show');
+      sub.textContent = GER[i].en; sub.classList.add('show');
+      hideT = setTimeout(() => { node.classList.remove('show'); sub.classList.remove('show'); }, 2800);
+      speak(GER[i].de, { german: true });
+      return;
+    }
     let i; do { i = Math.floor(Math.random() * PHRASES.length); } while (i === last && PHRASES.length > 1);
     last = i;
     const laugh = Math.random() < 0.18;
@@ -300,7 +334,7 @@ const referee = (() => {
     node.innerHTML = `<span class="flag">🇫🇷</span>${fr}`;
     node.classList.add('show');
     sub.textContent = en; sub.classList.add('show'); // English subtitle at the foot of the screen
-    clearTimeout(hideT); hideT = setTimeout(() => { node.classList.remove('show'); sub.classList.remove('show'); }, 2800);
+    hideT = setTimeout(() => { node.classList.remove('show'); sub.classList.remove('show'); }, 2800);
     speak(fr);
   }
   return { announce };
@@ -654,7 +688,7 @@ el('launch').addEventListener('click', launch);
 // --- loop -----------------------------------------------------------------------------------------
 // Physics still runs in 2D plan coords; the WebGL renderer draws that state in 3D each frame.
 let last = 0, acc = 0, simTime = 0, throwAt = 0;
-const OVERHEAD_HOLD_MS = 1500; // settle → pan up (~0.8s) + hold overhead before easing back down
+const OVERHEAD_HOLD_MS = 3000; // settle → pan up (~0.8s) + hold overhead (long dwell to read the distances) before easing back
 const PAN_BACK_MS = 1000;      // slow drift home; the turn is handed over as it nears the play view
 function frame(ts) {
   const now = ts / 1000; if (!last) last = now; let d = now - last; last = now;

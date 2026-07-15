@@ -58,6 +58,7 @@ const renderer = createPetanqueRenderer(cv, overlay, { W, H, P, THROW, R, JACK_R
 
 // --- state ------------------------------------------------------------------------------------------
 let jack, bodies, boulesLeft, scores, current, mode, phase, aim, aiTimer, settleTimer;
+let impacts = [];  // collision events (contact point + strength) drained each frame for shock-rings + shake
 // The spin ball's contact point (like snooker english): side −1..+1 = hook L/R; vert −1..+1 = lob..roll.
 let strike = { side: 0, vert: 0 };
 const loftFromVert = (v) => clamp(0.5 + v * 0.42, 0.08, 0.95); // draw(down)=lob, follow(up)=roll
@@ -188,6 +189,8 @@ function step(dt) {
       if (vn < 0) {
         a.vx += vn * nx; a.vy += vn * ny; c.vx -= vn * nx; c.vy -= vn * ny;
         if (a.state === 'rest') a.state = 'ground'; if (c.state === 'rest') c.state = 'ground';
+        const s = Math.min(1, Math.abs(vn) / 300); // how hard the click was → ring size + camera kick
+        if (s > 0.1) impacts.push({ x: a.x + nx * a.r, y: a.y + ny * a.r, s });
       }
       if (jack.team === -1) clampInto(jack);
     }
@@ -307,7 +310,7 @@ function frame(ts) {
     }
   }
   // b.airLift is set by the physics step during flight; the renderer reads it for the 3D arc.
-  renderer.frame({ jack, bodies, aim, aiming, humanTurn, phase }, d);
+  renderer.frame({ jack, bodies, aim, aiming, humanTurn, phase, impacts }, d);
   requestAnimationFrame(frame);
 }
 

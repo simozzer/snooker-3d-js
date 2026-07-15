@@ -133,6 +133,15 @@ function smokeTex() {
   g.fillStyle = grd; g.fillRect(0, 0, 64, 64); return c;
 }
 
+// A soft ring band, used for impact shock-waves and the holding-point marker. The band is kept fat and
+// bright so it survives mipmapping when the billboard is drawn small on screen.
+function ringTex() {
+  const c = cvs(128, 128), g = c.getContext('2d'), grd = g.createRadialGradient(64, 64, 16, 64, 64, 62);
+  grd.addColorStop(0, 'rgba(255,255,255,0)'); grd.addColorStop(0.42, 'rgba(255,255,255,0)');
+  grd.addColorStop(0.72, 'rgba(255,255,255,1)'); grd.addColorStop(0.88, 'rgba(255,255,255,0.7)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 128); return c;
+}
+
 // A machined-steel boule skin, tinted to the team. Latitude grooves (constant-v lines on the sphere) and
 // a maker's stamp give the surface features to READ as it rolls and tumbles — a bare colour never would.
 function bouleTex(base) {
@@ -314,11 +323,11 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
     backdrop: tex(gl, backdropTex()), glow: tex(gl, softDisc('255,255,255')),
     dust: tex(gl, softDisc('176,150,104')),
     boule: [tex(gl, bouleTex(TEAM[0].fill[1])), tex(gl, bouleTex(TEAM[1].fill[1]))],
-    jack: tex(gl, bouleTex('#d8b45a')),
+    jack: tex(gl, bouleTex('#d8b45a')), ring: tex(gl, ringTex()),
   };
 
-  // transient particles: flight trails behind airborne boules, and landing-dust puffs
-  const trails = [], groundDust = [];
+  // transient particles: flight trails behind airborne boules, landing-dust puffs, impact shock-rings
+  const trails = [], groundDust = [], sparks = [];
 
   // ---- the crowd -----------------------------------------------------------------------------------
   const ACTIONS = ['smoke', 'drink', 'eat', 'chat'];
@@ -350,11 +359,13 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
   }
 
   // ---- camera --------------------------------------------------------------------------------------
-  let vp = M.perspective(1, 1, 1, 1), camPos = [0, 300, 470], t = 0;
+  let vp = M.perspective(1, 1, 1, 1), camPos = [0, 300, 470], t = 0, shake = 0;
   function updateCamera(dt) {
     t += dt;
+    shake = Math.max(0, shake - dt * 2.4); // impact shake decays back to the steady drift
     const sway = Math.sin(t * 0.12) * 26;
-    camPos = [sway, 292 + Math.sin(t * 0.09) * 8, 486];
+    const sx = (Math.random() - 0.5) * shake * 26, sy = (Math.random() - 0.5) * shake * 15;
+    camPos = [sway + sx, 292 + Math.sin(t * 0.09) * 8 + sy, 486];
     const proj = M.perspective(40 * Math.PI / 180, glCanvas.width / glCanvas.height, 1, 4000);
     const view = M.lookAt(camPos, [0, 18, -30], [0, 1, 0]);
     vp = M.mul(proj, view);
@@ -469,6 +480,25 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
     for (let i = groundDust.length - 1; i >= 0; i--) { const p = groundDust[i]; p.life += dt; if (p.life > p.max) { groundDust.splice(i, 1); continue; }
       const k = p.life / p.max, sz = p.r0 + k * 26, a = (1 - k) * 0.5;
       drawBillboard(T.dust, toWorld(p.x, p.y, 4 + k * 20), [sz, sz], { up: camUp, right, alpha: a });
+    }
+
+    // holding-point ring — mark whichever boule currently lies nearest the jack (the point) while you aim
+    if (state.phase === 'aim') {
+      let hold = null, hd = Infinity;
+      for (const b of state.bodies) { if (b.dead) continue; const d = Math.hypot(b.x - state.jack.x, b.y - state.jack.y); if (d < hd) { hd = d; hold = b; } }
+      if (hold) { const sz = hold.r * 3.4, a = 0.4 + 0.16 * Math.sin(t * 4);
+        drawBillboard(T.ring, toWorld(hold.x, hold.y, 0.9), [sz, sz], { up: [0, 0, 1], right: [1, 0, 0], alpha: a, tint: hex(TEAM[hold.team].fill[1]) }); }
+    }
+
+    // impacts — boules cracking together: spawn a shock-ring + kick the camera, then draw the live rings
+    if (state.impacts && state.impacts.length) {
+      for (const im of state.impacts) { sparks.push({ x: im.x, y: im.y, life: 0, max: 0.55, s: im.s }); shake = Math.min(1, shake + im.s * 0.75); if (im.s > 0.4) react(); }
+      state.impacts.length = 0;
+    }
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive flash
+    for (let i = sparks.length - 1; i >= 0; i--) { const p = sparks[i]; p.life += dt; if (p.life > p.max) { sparks.splice(i, 1); continue; }
+      const k = p.life / p.max, sz = (18 + p.s * 34) * (0.45 + k * 1.7), a = (1 - k) * (0.5 + p.s * 0.45);
+      drawBillboard(T.ring, toWorld(p.x, p.y, 1.4), [sz, sz], { up: [0, 0, 1], right: [1, 0, 0], alpha: a });
     }
     gl.depthMask(true); gl.disable(gl.BLEND);
 

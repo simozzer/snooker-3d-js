@@ -108,63 +108,93 @@ const sfx = (() => {
 // (banana, bicycle, cheese…), to full nonsense ("where is my bicycle?", "why do you smell?"), and now and
 // then the obligatory "hon hon hon". A caption always shows; it's SPOKEN aloud (fr-FR) unless sound's muted.
 const referee = (() => {
+  // Each line is bilingual: fr = spoken/captioned French, en = the subtitle translation (education!).
   const PHRASES = [
-    'Boule !', 'Pétanque !', 'Le cochonnet !', 'Tirez !', 'Pointez !', 'Carreau !', 'Le bouchon !',
-    'Fanny !', 'Un point !', 'Le but !',
-    'La banane.', 'La bicyclette.', 'Le fromage.', 'Le croissant.', 'La baguette.', "L'escargot.",
-    'Le béret.', 'La moustache.', 'Le pamplemousse.', 'La grenouille.', 'Le camembert.', 'La saucisse.',
-    'Le parapluie.', 'La chaussette.', 'Le canard.',
-    'Zut alors !', 'Sacré bleu !', 'Oh là là !', 'Magnifique !', 'Catastrophe !', 'Formidable !',
-    'Incroyable !', 'Quelle horreur !', "C'est la vie.", 'Bof.', 'Mon Dieu !',
-    'Où est ma bicyclette ?', 'Pourquoi tu sens mauvais ?', 'Je suis une pomme de terre.',
-    'Le chat porte un chapeau.', 'As-tu vu mon fromage ?', 'Il pleut des grenouilles.',
-    'Ma grand-mère fait du vélo.', 'Le poisson est fatigué.', 'Où sont mes chaussettes ?',
-    'Tu danses comme un canard.', 'Mon pantalon est trop petit.', 'Le président mange une baguette.',
-    "Je n'aime pas le lundi.", 'Ton chapeau est ridicule.',
-    // 100 more — food, beasts, objects, exclamations, and pure nonsense
-    'Le café.', 'Le vin rouge.', 'La moutarde.', 'Le beurre.', 'La crème.', 'Le pain.', 'La tarte.',
-    'Le gâteau.', 'La confiture.', 'Le chocolat.', 'La brioche.', 'Le poireau.', "L'aubergine.",
-    'La courgette.', 'Le champignon.', 'La cerise.', 'La fraise.', 'Le raisin.', "L'oignon.", "L'ail.",
-    'Le homard.', "L'huître.", 'La truffe.', 'Le cornichon.', 'La ratatouille.',
-    'Le hérisson.', 'Le hibou.', 'La chèvre.', 'Le mouton.', 'Le cheval.', 'La vache.', 'Le cochon.',
-    'La poule.', 'Le coq.', 'Le lapin.', 'La souris.', "L'âne.", 'Le papillon.', "L'abeille.",
-    'Le crapaud.', 'La libellule.',
-    'Le tabouret.', 'La brouette.', 'Le tire-bouchon.', "L'accordéon.", 'La guillotine.', 'Le tricycle.',
-    'La casquette.', 'Les lunettes.', 'Le mouchoir.', 'La valise.', 'Le tournevis.', 'La cuillère.',
-    'Le balai.', "L'oreiller.",
-    'Voilà !', 'Enfin !', 'Hélas !', 'Aïe !', 'Oups !', 'Bravo !', 'Superbe !', 'Épouvantable !',
-    'Splendide !', "Nom d'un chien !", 'Ça alors !', 'Pas mal.', 'Comme ci comme ça.', "N'importe quoi !",
-    'Doucement…', 'Attention !', 'Tant pis.', 'Tant mieux.', 'Et voilà le travail !', 'Chapeau !',
-    'Mon oncle est un fromage.', 'Le canard a volé ma montre.', "J'ai perdu mon éléphant.",
-    'As-tu mangé ma chaussure ?', 'Le fromage me regarde.', 'Pourquoi la lune est carrée ?',
-    'Ma tortue joue du piano.', 'Le facteur danse le tango.', 'Je collectionne les nuages.',
-    "Ton cheval a besoin d'un dentiste.", 'Où est passé mon accordéon ?', 'La soupe est trop bavarde.',
-    'Mon voisin parle aux escargots.', 'Le président a perdu son béret.',
-    'Il y a une grenouille dans ma poche.', 'Ta moustache est magnifique.',
-    'Le train pour Paris est en retard.', "J'ai épousé une baguette.", 'Le chat a mangé le maire.',
-    'Range ta chambre !', 'Ne mange pas le cochonnet !', 'Tu joues comme mon grand-père.',
-    'Encore une catastrophe !', 'La vache regarde le train.', 'Mon chapeau a des opinions.',
-    // ridiculous boasts and claims
-    "J'ai inventé le fromage.", 'Je suis le roi de la pétanque.', 'Mon chien parle trois langues.',
-    "J'ai mangé la lune hier soir.", 'Je peux voler quand personne ne regarde.',
-    "J'ai battu Napoléon aux boules.", "Ma moustache prédit l'avenir.", "J'ai deux cents ans.",
-    'Je suis champion du monde de sieste.', "J'ai un doctorat en fromage.",
-    'Je parle couramment le canard.', "J'ai gagné le Tour de France à pied.", 'Mes boules sont magiques.',
-    "Je n'ai jamais perdu une partie.", "J'ai dressé une armée d'escargots.",
-    'Le soleil se lève pour me saluer.', "Je suis plus fort qu'un tracteur.",
-    'Mon béret est béni par le pape.', "J'ai inventé la marche arrière.", 'Je peux soulever un cheval.',
-    "J'ai trois estomacs.", "J'ai vu le futur, c'est bleu.", 'Je cuisine mieux que ta mère.',
-    'Ma boule a un diplôme.', "J'ai domestiqué le tonnerre.", 'Personne ne lance comme moi.',
-    "J'ai gagné à la loterie douze fois.", "Je suis l'inventeur du dimanche.",
-    "Mon chat me doit de l'argent.", "J'ai mangé un dictionnaire, je sais tout.",
-    "J'ai un jumeau sur la lune.", 'Ma grand-mère soulève des voitures.', "J'ai inventé le silence.",
-    'Les pigeons travaillent pour moi.', "J'ai écrit la Marseillaise.", 'Je suis invisible le mardi.',
-    'Mon parapluie contrôle la météo.', "J'ai battu un ours au bras de fer.",
-    'Je suis le meilleur, demandez à ma mère.', "J'ai inventé l'eau.", 'Ma boule obéit à mes pensées.',
-    "J'ai vécu mille vies.", 'Je fais pleuvoir en claquant des doigts.', "J'ai appris à lire aux poissons.",
-    'Le vent me demande la permission.',
+    { fr: 'Boule !', en: 'Ball!' }, { fr: 'Pétanque !', en: 'Pétanque!' }, { fr: 'Le cochonnet !', en: 'The jack!' },
+    { fr: 'Tirez !', en: 'Shoot!' }, { fr: 'Pointez !', en: 'Point!' }, { fr: 'Carreau !', en: 'Direct hit!' },
+    { fr: 'Le bouchon !', en: 'The jack!' }, { fr: 'Fanny !', en: 'Whitewash!' }, { fr: 'Un point !', en: 'One point!' },
+    { fr: 'Le but !', en: 'The target!' },
+    { fr: 'La banane.', en: 'The banana.' }, { fr: 'La bicyclette.', en: 'The bicycle.' }, { fr: 'Le fromage.', en: 'The cheese.' },
+    { fr: 'Le croissant.', en: 'The croissant.' }, { fr: 'La baguette.', en: 'The baguette.' }, { fr: "L'escargot.", en: 'The snail.' },
+    { fr: 'Le béret.', en: 'The beret.' }, { fr: 'La moustache.', en: 'The moustache.' }, { fr: 'Le pamplemousse.', en: 'The grapefruit.' },
+    { fr: 'La grenouille.', en: 'The frog.' }, { fr: 'Le camembert.', en: 'The camembert.' }, { fr: 'La saucisse.', en: 'The sausage.' },
+    { fr: 'Le parapluie.', en: 'The umbrella.' }, { fr: 'La chaussette.', en: 'The sock.' }, { fr: 'Le canard.', en: 'The duck.' },
+    { fr: 'Zut alors !', en: 'Darn it!' }, { fr: 'Sacré bleu !', en: 'Good heavens!' }, { fr: 'Oh là là !', en: 'Oh my!' },
+    { fr: 'Magnifique !', en: 'Magnificent!' }, { fr: 'Catastrophe !', en: 'Disaster!' }, { fr: 'Formidable !', en: 'Terrific!' },
+    { fr: 'Incroyable !', en: 'Incredible!' }, { fr: 'Quelle horreur !', en: 'How awful!' }, { fr: "C'est la vie.", en: "That's life." },
+    { fr: 'Bof.', en: 'Meh.' }, { fr: 'Mon Dieu !', en: 'My God!' },
+    { fr: 'Où est ma bicyclette ?', en: 'Where is my bicycle?' }, { fr: 'Pourquoi tu sens mauvais ?', en: 'Why do you smell bad?' },
+    { fr: 'Je suis une pomme de terre.', en: 'I am a potato.' }, { fr: 'Le chat porte un chapeau.', en: 'The cat is wearing a hat.' },
+    { fr: 'As-tu vu mon fromage ?', en: 'Have you seen my cheese?' }, { fr: 'Il pleut des grenouilles.', en: "It's raining frogs." },
+    { fr: 'Ma grand-mère fait du vélo.', en: 'My grandmother rides a bike.' }, { fr: 'Le poisson est fatigué.', en: 'The fish is tired.' },
+    { fr: 'Où sont mes chaussettes ?', en: 'Where are my socks?' }, { fr: 'Tu danses comme un canard.', en: 'You dance like a duck.' },
+    { fr: 'Mon pantalon est trop petit.', en: 'My trousers are too small.' }, { fr: 'Le président mange une baguette.', en: 'The president is eating a baguette.' },
+    { fr: "Je n'aime pas le lundi.", en: "I don't like Monday." }, { fr: 'Ton chapeau est ridicule.', en: 'Your hat is ridiculous.' },
+    { fr: 'Le café.', en: 'The coffee.' }, { fr: 'Le vin rouge.', en: 'The red wine.' }, { fr: 'La moutarde.', en: 'The mustard.' },
+    { fr: 'Le beurre.', en: 'The butter.' }, { fr: 'La crème.', en: 'The cream.' }, { fr: 'Le pain.', en: 'The bread.' },
+    { fr: 'La tarte.', en: 'The tart.' }, { fr: 'Le gâteau.', en: 'The cake.' }, { fr: 'La confiture.', en: 'The jam.' },
+    { fr: 'Le chocolat.', en: 'The chocolate.' }, { fr: 'La brioche.', en: 'The brioche.' }, { fr: 'Le poireau.', en: 'The leek.' },
+    { fr: "L'aubergine.", en: 'The aubergine.' }, { fr: 'La courgette.', en: 'The courgette.' }, { fr: 'Le champignon.', en: 'The mushroom.' },
+    { fr: 'La cerise.', en: 'The cherry.' }, { fr: 'La fraise.', en: 'The strawberry.' }, { fr: 'Le raisin.', en: 'The grape.' },
+    { fr: "L'oignon.", en: 'The onion.' }, { fr: "L'ail.", en: 'The garlic.' }, { fr: 'Le homard.', en: 'The lobster.' },
+    { fr: "L'huître.", en: 'The oyster.' }, { fr: 'La truffe.', en: 'The truffle.' }, { fr: 'Le cornichon.', en: 'The gherkin.' },
+    { fr: 'La ratatouille.', en: 'The ratatouille.' },
+    { fr: 'Le hérisson.', en: 'The hedgehog.' }, { fr: 'Le hibou.', en: 'The owl.' }, { fr: 'La chèvre.', en: 'The goat.' },
+    { fr: 'Le mouton.', en: 'The sheep.' }, { fr: 'Le cheval.', en: 'The horse.' }, { fr: 'La vache.', en: 'The cow.' },
+    { fr: 'Le cochon.', en: 'The pig.' }, { fr: 'La poule.', en: 'The hen.' }, { fr: 'Le coq.', en: 'The rooster.' },
+    { fr: 'Le lapin.', en: 'The rabbit.' }, { fr: 'La souris.', en: 'The mouse.' }, { fr: "L'âne.", en: 'The donkey.' },
+    { fr: 'Le papillon.', en: 'The butterfly.' }, { fr: "L'abeille.", en: 'The bee.' }, { fr: 'Le crapaud.', en: 'The toad.' },
+    { fr: 'La libellule.', en: 'The dragonfly.' },
+    { fr: 'Le tabouret.', en: 'The stool.' }, { fr: 'La brouette.', en: 'The wheelbarrow.' }, { fr: 'Le tire-bouchon.', en: 'The corkscrew.' },
+    { fr: "L'accordéon.", en: 'The accordion.' }, { fr: 'La guillotine.', en: 'The guillotine.' }, { fr: 'Le tricycle.', en: 'The tricycle.' },
+    { fr: 'La casquette.', en: 'The cap.' }, { fr: 'Les lunettes.', en: 'The glasses.' }, { fr: 'Le mouchoir.', en: 'The handkerchief.' },
+    { fr: 'La valise.', en: 'The suitcase.' }, { fr: 'Le tournevis.', en: 'The screwdriver.' }, { fr: 'La cuillère.', en: 'The spoon.' },
+    { fr: 'Le balai.', en: 'The broom.' }, { fr: "L'oreiller.", en: 'The pillow.' },
+    { fr: 'Voilà !', en: 'There it is!' }, { fr: 'Enfin !', en: 'At last!' }, { fr: 'Hélas !', en: 'Alas!' },
+    { fr: 'Aïe !', en: 'Ouch!' }, { fr: 'Oups !', en: 'Oops!' }, { fr: 'Bravo !', en: 'Well done!' },
+    { fr: 'Superbe !', en: 'Superb!' }, { fr: 'Épouvantable !', en: 'Dreadful!' }, { fr: 'Splendide !', en: 'Splendid!' },
+    { fr: "Nom d'un chien !", en: 'Good grief!' }, { fr: 'Ça alors !', en: 'Well I never!' }, { fr: 'Pas mal.', en: 'Not bad.' },
+    { fr: 'Comme ci comme ça.', en: 'So-so.' }, { fr: "N'importe quoi !", en: 'Nonsense!' }, { fr: 'Doucement…', en: 'Gently…' },
+    { fr: 'Attention !', en: 'Careful!' }, { fr: 'Tant pis.', en: 'Too bad.' }, { fr: 'Tant mieux.', en: 'All the better.' },
+    { fr: 'Et voilà le travail !', en: 'And there we go!' }, { fr: 'Chapeau !', en: 'Hats off!' },
+    { fr: 'Mon oncle est un fromage.', en: 'My uncle is a cheese.' }, { fr: 'Le canard a volé ma montre.', en: 'The duck stole my watch.' },
+    { fr: "J'ai perdu mon éléphant.", en: 'I lost my elephant.' }, { fr: 'As-tu mangé ma chaussure ?', en: 'Did you eat my shoe?' },
+    { fr: 'Le fromage me regarde.', en: 'The cheese is watching me.' }, { fr: 'Pourquoi la lune est carrée ?', en: 'Why is the moon square?' },
+    { fr: 'Ma tortue joue du piano.', en: 'My tortoise plays the piano.' }, { fr: 'Le facteur danse le tango.', en: 'The postman is dancing the tango.' },
+    { fr: 'Je collectionne les nuages.', en: 'I collect clouds.' }, { fr: "Ton cheval a besoin d'un dentiste.", en: 'Your horse needs a dentist.' },
+    { fr: 'Où est passé mon accordéon ?', en: 'Where has my accordion gone?' }, { fr: 'La soupe est trop bavarde.', en: 'The soup is too chatty.' },
+    { fr: 'Mon voisin parle aux escargots.', en: 'My neighbour talks to snails.' }, { fr: 'Le président a perdu son béret.', en: 'The president has lost his beret.' },
+    { fr: 'Il y a une grenouille dans ma poche.', en: "There's a frog in my pocket." }, { fr: 'Ta moustache est magnifique.', en: 'Your moustache is magnificent.' },
+    { fr: 'Le train pour Paris est en retard.', en: 'The train to Paris is late.' }, { fr: "J'ai épousé une baguette.", en: 'I married a baguette.' },
+    { fr: 'Le chat a mangé le maire.', en: 'The cat ate the mayor.' }, { fr: 'Range ta chambre !', en: 'Tidy your room!' },
+    { fr: 'Ne mange pas le cochonnet !', en: "Don't eat the jack!" }, { fr: 'Tu joues comme mon grand-père.', en: 'You play like my grandfather.' },
+    { fr: 'Encore une catastrophe !', en: 'Another disaster!' }, { fr: 'La vache regarde le train.', en: 'The cow is watching the train.' },
+    { fr: 'Mon chapeau a des opinions.', en: 'My hat has opinions.' },
+    { fr: "J'ai inventé le fromage.", en: 'I invented cheese.' }, { fr: 'Je suis le roi de la pétanque.', en: 'I am the king of pétanque.' },
+    { fr: 'Mon chien parle trois langues.', en: 'My dog speaks three languages.' }, { fr: "J'ai mangé la lune hier soir.", en: 'I ate the moon last night.' },
+    { fr: 'Je peux voler quand personne ne regarde.', en: 'I can fly when nobody is looking.' }, { fr: "J'ai battu Napoléon aux boules.", en: 'I beat Napoleon at boules.' },
+    { fr: "Ma moustache prédit l'avenir.", en: 'My moustache predicts the future.' }, { fr: "J'ai deux cents ans.", en: 'I am two hundred years old.' },
+    { fr: 'Je suis champion du monde de sieste.', en: 'I am the world nap champion.' }, { fr: "J'ai un doctorat en fromage.", en: 'I have a PhD in cheese.' },
+    { fr: 'Je parle couramment le canard.', en: 'I speak fluent duck.' }, { fr: "J'ai gagné le Tour de France à pied.", en: 'I won the Tour de France on foot.' },
+    { fr: 'Mes boules sont magiques.', en: 'My boules are magic.' }, { fr: "Je n'ai jamais perdu une partie.", en: 'I have never lost a game.' },
+    { fr: "J'ai dressé une armée d'escargots.", en: 'I trained an army of snails.' }, { fr: 'Le soleil se lève pour me saluer.', en: 'The sun rises to greet me.' },
+    { fr: "Je suis plus fort qu'un tracteur.", en: 'I am stronger than a tractor.' }, { fr: 'Mon béret est béni par le pape.', en: 'My beret is blessed by the Pope.' },
+    { fr: "J'ai inventé la marche arrière.", en: 'I invented reversing.' }, { fr: 'Je peux soulever un cheval.', en: 'I can lift a horse.' },
+    { fr: "J'ai trois estomacs.", en: 'I have three stomachs.' }, { fr: "J'ai vu le futur, c'est bleu.", en: "I've seen the future, it's blue." },
+    { fr: 'Je cuisine mieux que ta mère.', en: 'I cook better than your mother.' }, { fr: 'Ma boule a un diplôme.', en: 'My boule has a diploma.' },
+    { fr: "J'ai domestiqué le tonnerre.", en: 'I tamed thunder.' }, { fr: 'Personne ne lance comme moi.', en: 'Nobody throws like me.' },
+    { fr: "J'ai gagné à la loterie douze fois.", en: 'I won the lottery twelve times.' }, { fr: "Je suis l'inventeur du dimanche.", en: 'I am the inventor of Sunday.' },
+    { fr: "Mon chat me doit de l'argent.", en: 'My cat owes me money.' }, { fr: "J'ai mangé un dictionnaire, je sais tout.", en: 'I ate a dictionary, I know everything.' },
+    { fr: "J'ai un jumeau sur la lune.", en: 'I have a twin on the moon.' }, { fr: 'Ma grand-mère soulève des voitures.', en: 'My grandmother lifts cars.' },
+    { fr: "J'ai inventé le silence.", en: 'I invented silence.' }, { fr: 'Les pigeons travaillent pour moi.', en: 'The pigeons work for me.' },
+    { fr: "J'ai écrit la Marseillaise.", en: 'I wrote the Marseillaise.' }, { fr: 'Je suis invisible le mardi.', en: 'I am invisible on Tuesdays.' },
+    { fr: 'Mon parapluie contrôle la météo.', en: 'My umbrella controls the weather.' }, { fr: "J'ai battu un ours au bras de fer.", en: 'I beat a bear at arm wrestling.' },
+    { fr: 'Je suis le meilleur, demandez à ma mère.', en: 'I am the best, ask my mother.' }, { fr: "J'ai inventé l'eau.", en: 'I invented water.' },
+    { fr: 'Ma boule obéit à mes pensées.', en: 'My boule obeys my thoughts.' }, { fr: "J'ai vécu mille vies.", en: 'I have lived a thousand lives.' },
+    { fr: 'Je fais pleuvoir en claquant des doigts.', en: 'I make it rain by snapping my fingers.' },
+    { fr: "J'ai appris à lire aux poissons.", en: 'I taught fish to read.' }, { fr: 'Le vent me demande la permission.', en: 'The wind asks my permission.' },
   ];
-  const node = el('ref');
+  const node = el('ref'), sub = el('subtitle');
   let last = -1, hideT = 0, voice = null;
   const loadVoice = () => { try { voice = speechSynthesis.getVoices().find((v) => /^fr/i.test(v.lang)) || null; } catch { /* none */ } };
   try { loadVoice(); if (speechSynthesis.onvoiceschanged !== undefined) speechSynthesis.onvoiceschanged = loadVoice; } catch { /* no TTS */ }
@@ -179,11 +209,14 @@ const referee = (() => {
   function announce() {
     let i; do { i = Math.floor(Math.random() * PHRASES.length); } while (i === last && PHRASES.length > 1);
     last = i;
-    const phrase = (Math.random() < 0.18 ? 'Hon hon hon… ' : '') + PHRASES[i];
-    node.innerHTML = `<span class="flag">🇫🇷</span>${phrase}`;
+    const laugh = Math.random() < 0.18;
+    const fr = (laugh ? 'Hon hon hon… ' : '') + PHRASES[i].fr;
+    const en = (laugh ? '(chuckles) ' : '') + PHRASES[i].en;
+    node.innerHTML = `<span class="flag">🇫🇷</span>${fr}`;
     node.classList.add('show');
-    clearTimeout(hideT); hideT = setTimeout(() => node.classList.remove('show'), 2600);
-    speak(phrase);
+    sub.textContent = en; sub.classList.add('show'); // English subtitle at the foot of the screen
+    clearTimeout(hideT); hideT = setTimeout(() => { node.classList.remove('show'); sub.classList.remove('show'); }, 2800);
+    speak(fr);
   }
   return { announce };
 })();
@@ -270,6 +303,7 @@ function throwTo(landing, loft, spin, team) {
     style: loft, spin, curve: spin * CURVE_MAX, arc: arcHeight(loft) };
   bodies.push(b);
   phase = 'sim';
+  throwAt = performance.now(); // used to give each move at least ~1.5s to finish before the next begins
   aim = null;
   renderer.react(); // heads in the crowd turn to watch the throw
   syncHud();
@@ -497,7 +531,7 @@ el('launch').addEventListener('click', launch);
 
 // --- loop -----------------------------------------------------------------------------------------
 // Physics still runs in 2D plan coords; the WebGL renderer draws that state in 3D each frame.
-let last = 0, acc = 0, simTime = 0;
+let last = 0, acc = 0, simTime = 0, throwAt = 0;
 function frame(ts) {
   const now = ts / 1000; if (!last) last = now; let d = now - last; last = now;
   if (d > 0.05) d = 0.05;
@@ -507,7 +541,10 @@ function frame(ts) {
     if (!moving || simTime > 7) { // settled (or safety timeout)
       [jack, ...bodies].forEach((b) => { if (b.state !== 'air') { b.state = 'rest'; b.vx = b.vy = 0; } });
       simTime = 0; acc = 0;
-      clearTimeout(settleTimer); settleTimer = setTimeout(afterSettle, 250);
+      // hold the next move until the current one has had at least ~1.5s to play out (fixes rushed/stalled
+      // transitions between moves); normal throws already exceed this, so it only paces the very quick ones.
+      const gap = Math.max(300, 1500 - (performance.now() - throwAt));
+      clearTimeout(settleTimer); settleTimer = setTimeout(afterSettle, gap);
       phase = 'settling';
     }
   }

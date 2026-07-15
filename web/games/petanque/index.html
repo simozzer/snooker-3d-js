@@ -66,6 +66,13 @@
     #launch.ready:hover { filter: brightness(1.12); }
     #launch.ready:active { transform: translateY(1px); }
     @keyframes launchPulse { 0%,100% { box-shadow: 0 8px 20px rgba(0,0,0,.45); } 50% { box-shadow: 0 8px 26px rgba(84,201,138,.6); } }
+    /* English subtitle — the referee's line, translated, sat at the foot of the screen like film subtitles */
+    #subtitle { position: fixed; left: 50%; bottom: 72px; transform: translate(-50%, 6px); z-index: 55;
+      max-width: min(78vw, 640px); text-align: center; pointer-events: none;
+      background: rgba(8,10,14,.72); color: #f2f4f7; font: 600 17px/1.35 system-ui, sans-serif;
+      padding: 6px 16px; border-radius: 10px; text-shadow: 0 1px 3px rgba(0,0,0,.85);
+      opacity: 0; transition: opacity .2s ease, transform .2s ease; }
+    #subtitle.show { opacity: 1; transform: translate(-50%, 0); }
     #status { min-height: 22px; margin: 8px 0 4px; font-size: 15px; font-weight: 700; text-align: center; color: #ffcf5b; }
     #status.win { color: #54c98a; }
     footer { margin: 6px 0 30px; font-size: 12px; color: #6f8496; text-align: center; max-width: 620px; padding: 0 16px; }
@@ -98,6 +105,7 @@
 
   <div id="wrap"><canvas id="piste"></canvas><canvas id="aim"></canvas><div id="ref" aria-live="polite"></div><button id="launch">Launch ▶</button></div>
   <div id="status"></div>
+  <div id="subtitle"></div>
 
   <footer>Set a shot in three steps, then fire it. <b>1 · Line &amp; power:</b> drag out from the throwing circle — the way you drag is your line, how far you drag is the power (the ring shows angle and power, and a dotted arc previews the flight). It's force, not a target, so aiming straight at the jack and yanking hard sails long past it. <b>2 · Spin:</b> on the little steel ball, drag the dot <b>up to roll on</b>, <b>down to lob and drop dead</b>, or <b>out to hook</b> left/right. <b>3 · <span style="color:#54c98a">Launch ▶</span></b> (bottom-right) to throw. The trajectory stays put while you tweak it, so nothing fires until you say so. Closest boule to the jack wins the end; first to 13 wins. A boule off the piste is dead. <b>2–4 players</b> (pick a mode top-right, incl. AI self-play to watch) — each has a colour <b>and</b> a shape (● ◎ ■ ▲) so boules are easy to tell apart.</footer>
 

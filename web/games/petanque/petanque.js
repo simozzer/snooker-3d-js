@@ -61,6 +61,7 @@ let jack, bodies, boulesLeft, scores, current, mode, phase, aim, aiTimer, settle
 // The spin ball's contact point (like snooker english): side −1..+1 = hook L/R; vert −1..+1 = lob..roll.
 let strike = { side: 0, vert: 0 };
 const loftFromVert = (v) => clamp(0.5 + v * 0.42, 0.08, 0.95); // draw(down)=lob, follow(up)=roll
+const vertFromLoft = (loft) => clamp((loft - 0.5) / 0.42, -1, 1); // inverse — to show the computer's pick on the ball
 const shotName = (v) => (v > 0.34 ? 'Roll' : v < -0.34 ? 'Lob' : 'Pitch');
 // phase: 'aim' (human to throw) | 'sim' (physics running) | 'measure' | 'over'
 
@@ -80,6 +81,7 @@ function startEnd(starter) {
   clampInto(jack);
   phase = 'aim';
   aim = null;
+  setStrike(0, 0); // fresh end: spin ball back to centre
   status(`${current === 0 ? 'Your' : "Computer's"} throw — ${boulesLeft[current]} boules left`);
   syncHud();
   maybeAI();
@@ -203,6 +205,7 @@ function afterSettle() {
   if (boulesLeft[0] <= 0 && boulesLeft[1] <= 0) { measure(); return; }
   current = next;
   phase = 'aim';
+  setStrike(0, 0); // each turn starts from a centred spin ball; the computer sets its own before it throws
   status(`${current === 0 ? 'Your' : "Computer's"} throw — ${boulesLeft[current]} left`);
   syncHud();
   maybeAI();
@@ -242,7 +245,9 @@ function maybeAI() {
       const s = 30; target = { x: jack.x + (Math.random() - 0.5) * s, y: jack.y + (Math.random() - 0.5) * s };
       loft = 0.3 + Math.random() * 0.25; spin = (Math.random() - 0.5) * 0.5;  // point: gentle arc, a little hook
     }
-    throwTo(reachable(target), loft, spin, 1);
+    // show the computer setting its shot on the spin ball, then throw a beat later so you can see it
+    setStrike(spin, vertFromLoft(loft));
+    aiTimer = setTimeout(() => { if (phase === 'aim' && current === 1) throwTo(reachable(target), loft, spin, 1); }, 520);
   }, 900);
 }
 
@@ -357,14 +362,16 @@ function setStrike(side, vert) {
   drawSpinBall(); syncShot();
 }
 function sbFrom(ev) {
+  if (!humanTurn()) return; // can't set spin on the computer's turn — the ball shows ITS pick then
   const r = sb.getBoundingClientRect();
   setStrike(((ev.clientX - r.left) * (SBW / r.width) - SBC) / SBR, -((ev.clientY - r.top) * (SBW / r.height) - SBC) / SBR);
 }
 sb.addEventListener('pointerdown', (ev) => { sb.focus(); try { sb.setPointerCapture(ev.pointerId); } catch { /* ignore */ } sbFrom(ev); });
 sb.addEventListener('pointermove', (ev) => { if (ev.buttons) sbFrom(ev); });
-sb.addEventListener('dblclick', () => setStrike(0, 0));
+sb.addEventListener('dblclick', () => { if (humanTurn()) setStrike(0, 0); });
 // arrow keys nudge the contact point for fine adjustment; hold Shift for extra-fine, 0/Home to centre
 sb.addEventListener('keydown', (ev) => {
+  if (!humanTurn()) return;
   const s = ev.shiftKey ? 0.01 : 0.05;
   if (ev.key === 'ArrowUp') setStrike(strike.side, strike.vert + s);
   else if (ev.key === 'ArrowDown') setStrike(strike.side, strike.vert - s);

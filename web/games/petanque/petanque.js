@@ -144,7 +144,9 @@ function land(b) {
 function step(dt) {
   let moving = false;
 
-  for (const b of bodies) {
+  // Include the jack (team −1): a knocked jack must roll and settle under friction like any boule —
+  // otherwise the velocity the collision gives it is never damped, so it drifts/spins forever.
+  for (const b of [jack, ...bodies]) {
     if (b.state === 'air') {
       moving = true;
       b.t += dt * 1000;
@@ -293,7 +295,7 @@ function frame(ts) {
     acc += d; simTime += d; let moving = false;
     while (acc >= 1 / 120) { moving = step(1 / 120) || moving; acc -= 1 / 120; }
     if (!moving || simTime > 7) { // settled (or safety timeout)
-      bodies.forEach((b) => { if (b.state !== 'air') { b.state = 'rest'; b.vx = b.vy = 0; } });
+      [jack, ...bodies].forEach((b) => { if (b.state !== 'air') { b.state = 'rest'; b.vx = b.vy = 0; } });
       simTime = 0; acc = 0;
       clearTimeout(settleTimer); settleTimer = setTimeout(afterSettle, 250);
       phase = 'settling';
@@ -344,8 +346,10 @@ function drawSpinBall() {
   sbx.strokeStyle = 'rgba(255,255,255,.9)'; sbx.lineWidth = 2; sbx.stroke();
 }
 function syncShot() {
-  el('shot-name').textContent = shotName(strike.vert);
-  el('shot-sub').textContent = Math.abs(strike.side) < 0.08 ? 'straight' : `hook ${strike.side > 0 ? 'R' : 'L'} ${Math.abs(strike.side).toFixed(2)}`;
+  const v = strike.vert, s = strike.side;
+  // always two decimals + a fixed-width column, so the readout (and the panel) never resize as you adjust
+  el('shot-name').textContent = `${shotName(v)} ${Math.abs(v).toFixed(2)}`;
+  el('shot-sub').textContent = `hook ${Math.abs(s) < 0.005 ? '' : (s > 0 ? 'R' : 'L')}${Math.abs(s).toFixed(2)}`;
 }
 function setStrike(side, vert) {
   const m = Math.hypot(side, vert); if (m > 1) { side /= m; vert /= m; } // clamp the contact point to the ball's edge

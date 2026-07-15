@@ -48,6 +48,13 @@
     #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: 12px; }
     #piste { touch-action: none; box-shadow: 0 10px 30px rgba(0,0,0,.5); background: #0e1116; }
     #aim { pointer-events: none; }
+    /* the French referee's caption — floats in over the top of the piste, fades away */
+    #ref { position: absolute; left: 50%; top: 14px; transform: translate(-50%, -8px); z-index: 25;
+      max-width: 86%; background: rgba(18,24,30,.86); color: #ffe6b8; border: 1px solid #3a4550;
+      border-radius: 22px; padding: 8px 18px; font: 700 17px system-ui, sans-serif; text-align: center;
+      pointer-events: none; opacity: 0; transition: opacity .2s ease, transform .2s ease; box-shadow: 0 8px 20px rgba(0,0,0,.45); }
+    #ref.show { opacity: 1; transform: translate(-50%, 0); }
+    #ref .flag { margin-right: 7px; }
     /* Launch button: pinned bottom-right of the viewport so it's always in reach. Dim + click-through
        until a trajectory is aimed, then it lights up green and pulses. */
     #launch { position: fixed; right: 20px; bottom: 20px; z-index: 60; padding: 14px 26px;
@@ -89,7 +96,7 @@
     <button id="newgame">New game</button>
   </div>
 
-  <div id="wrap"><canvas id="piste"></canvas><canvas id="aim"></canvas><button id="launch">Launch ▶</button></div>
+  <div id="wrap"><canvas id="piste"></canvas><canvas id="aim"></canvas><div id="ref" aria-live="polite"></div><button id="launch">Launch ▶</button></div>
   <div id="status"></div>
 
   <footer>Set a shot in three steps, then fire it. <b>1 · Line &amp; power:</b> drag out from the throwing circle — the way you drag is your line, how far you drag is the power (the ring shows angle and power, and a dotted arc previews the flight). It's force, not a target, so aiming straight at the jack and yanking hard sails long past it. <b>2 · Spin:</b> on the little steel ball, drag the dot <b>up to roll on</b>, <b>down to lob and drop dead</b>, or <b>out to hook</b> left/right. <b>3 · <span style="color:#54c98a">Launch ▶</span></b> (bottom-right) to throw. The trajectory stays put while you tweak it, so nothing fires until you say so. Closest boule to the jack wins the end; first to 13 wins. A boule off the piste is dead. <b>2–4 players</b> (pick a mode top-right, incl. AI self-play to watch) — each has a colour <b>and</b> a shape (● ◎ ■ ▲) so boules are easy to tell apart.</footer>

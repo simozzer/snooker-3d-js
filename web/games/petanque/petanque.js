@@ -103,6 +103,49 @@ const sfx = (() => {
   return { thud, clink, chime, resume: ensure, toggle() { muted = !muted; return muted; }, get muted() { return muted; } };
 })();
 
+// --- the French referee (pure comedy) -------------------------------------------------------------
+// Announces every landing with a French word or phrase — from proper boules calls, through random nouns
+// (banana, bicycle, cheese…), to full nonsense ("where is my bicycle?", "why do you smell?"), and now and
+// then the obligatory "hon hon hon". A caption always shows; it's SPOKEN aloud (fr-FR) unless sound's muted.
+const referee = (() => {
+  const PHRASES = [
+    'Boule !', 'Pétanque !', 'Le cochonnet !', 'Tirez !', 'Pointez !', 'Carreau !', 'Le bouchon !',
+    'Fanny !', 'Un point !', 'Le but !',
+    'La banane.', 'La bicyclette.', 'Le fromage.', 'Le croissant.', 'La baguette.', "L'escargot.",
+    'Le béret.', 'La moustache.', 'Le pamplemousse.', 'La grenouille.', 'Le camembert.', 'La saucisse.',
+    'Le parapluie.', 'La chaussette.', 'Le canard.',
+    'Zut alors !', 'Sacré bleu !', 'Oh là là !', 'Magnifique !', 'Catastrophe !', 'Formidable !',
+    'Incroyable !', 'Quelle horreur !', "C'est la vie.", 'Bof.', 'Mon Dieu !',
+    'Où est ma bicyclette ?', 'Pourquoi tu sens mauvais ?', 'Je suis une pomme de terre.',
+    'Le chat porte un chapeau.', 'As-tu vu mon fromage ?', 'Il pleut des grenouilles.',
+    'Ma grand-mère fait du vélo.', 'Le poisson est fatigué.', 'Où sont mes chaussettes ?',
+    'Tu danses comme un canard.', 'Mon pantalon est trop petit.', 'Le président mange une baguette.',
+    "Je n'aime pas le lundi.", 'Ton chapeau est ridicule.',
+  ];
+  const node = el('ref');
+  let last = -1, hideT = 0, voice = null;
+  const loadVoice = () => { try { voice = speechSynthesis.getVoices().find((v) => /^fr/i.test(v.lang)) || null; } catch { /* none */ } };
+  try { loadVoice(); if (speechSynthesis.onvoiceschanged !== undefined) speechSynthesis.onvoiceschanged = loadVoice; } catch { /* no TTS */ }
+  function speak(text) {
+    if (sfx.muted) return;
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'fr-FR'; if (voice) u.voice = voice; u.rate = 0.95; u.pitch = 1.12;
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    } catch { /* no TTS */ }
+  }
+  function announce() {
+    let i; do { i = Math.floor(Math.random() * PHRASES.length); } while (i === last && PHRASES.length > 1);
+    last = i;
+    const phrase = (Math.random() < 0.18 ? 'Hon hon hon… ' : '') + PHRASES[i];
+    node.innerHTML = `<span class="flag">🇫🇷</span>${phrase}`;
+    node.classList.add('show');
+    clearTimeout(hideT); hideT = setTimeout(() => node.classList.remove('show'), 2600);
+    speak(phrase);
+  }
+  return { announce };
+})();
+
 // --- players + modes --------------------------------------------------------------------------------
 // Free-for-all: 2–4 players, each human or AI (closest boule to the jack takes the end; a player scores
 // one point per boule of theirs closer than the best of EVERYONE else). AI self-play = all-AI, sit back.
@@ -207,6 +250,7 @@ function land(b) {
   b.vx = Math.cos(kickAng) * kickSpd;
   b.vy = Math.sin(kickAng) * kickSpd;
   sfx.thud();
+  referee.announce(); // le référé français
 }
 
 // --- physics --------------------------------------------------------------------------------------

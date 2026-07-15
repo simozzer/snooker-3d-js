@@ -33,6 +33,23 @@ const DRAG_MIN = 16, DRAG_MAX = 205;                  // px of drag → 0..full 
 const DIST_MIN = 80, DIST_MAX = 486;                  // aerial landing distance (px) mapped from power
 const AIM_SPREAD_ANG = 0.045, AIM_SPREAD_DIST = 0.05; // ± line / ± distance a throw can stray by itself
 
+// Shot shaping: LOFT (0=high lob, 1=flat roll) sets the arc height + how far the boule runs after it lands;
+// SPIN (-1..+1) bows the flight path sideways (a banana curve) and makes the boule grab/hook on landing.
+const LIFT_BASE = 96;                 // world-unit apex height reference (scaled up for lobs, flattened for rolls)
+const CURVE_MAX = 130;                // px of sideways bow in the flight path at full spin
+const arcHeight = (loft) => LIFT_BASE * (1.25 - loft);   // lob → tall arc, roll → skimming
+const loftFor = (type) => (type === 'lob' ? 0.14 : type === 'roll' ? 0.9 : 0.5); // 'spin' rides a mid arc
+
+// Sample the flight path (plan coords + aerial height) so the aim overlay and the physics agree on the shape.
+function flightArc(from, to, loft, spin, n = 26) {
+  const dx = to.x - from.x, dy = to.y - from.y, len = Math.hypot(dx, dy) || 1;
+  const px = -dy / len, py = dx / len, curve = spin * CURVE_MAX, H = arcHeight(loft);
+  const pts = [];
+  for (let i = 0; i <= n; i++) { const k = i / n, s = Math.sin(k * Math.PI);
+    pts.push({ x: from.x + dx * k + px * curve * s, y: from.y + dy * k + py * curve * s, lift: s * H }); }
+  return pts;
+}
+
 const TEAM = [
   { name: 'you', fill: ['#dcecff', '#5a86dd', '#31509a'] },
   { name: 'opp', fill: ['#ffd9cb', '#d86a4f', '#9a3b2a'] },
@@ -42,6 +59,7 @@ const renderer = createPetanqueRenderer(cv, overlay, { W, H, P, THROW, R, JACK_R
 
 // --- state ------------------------------------------------------------------------------------------
 let jack, bodies, boulesLeft, scores, current, mode, phase, aim, aiTimer, settleTimer;
+let shotType = 'lob', shotSpin = 0;  // the shot chosen in the setup panel, read at release
 // phase: 'aim' (human to throw) | 'sim' (physics running) | 'measure' | 'over'
 
 function newMatch() {
@@ -80,7 +98,8 @@ function holdingTeam() {
 }
 
 // --- throwing -------------------------------------------------------------------------------------
-function throwTo(landing, style, team) {
+// loft: 0 (high lob) .. 1 (flat roll); spin: -1..+1 (banana curve + landing hook).
+function throwTo(landing, loft, spin, team) {
   if (boulesLeft[team] <= 0) return;
   // A hand is not a ruler: jitter the intended landing (line + distance) before the boule even leaves.
   // Applies to YOU and the computer alike, so aiming is judgement, not pixel-picking.
@@ -90,8 +109,10 @@ function throwTo(landing, style, team) {
   landing = reachable({ x: THROW.x + Math.cos(a) * d, y: THROW.y + Math.sin(a) * d });
   boulesLeft[team] -= 1;
   const b = { x: THROW.x, y: THROW.y, vx: 0, vy: 0, r: R, team, dead: false, state: 'air',
-    from: { x: THROW.x, y: THROW.y }, to: { x: landing.x, y: landing.y }, t: 0,
-    flight: Math.max(FLIGHT_MIN, dist(THROW, landing) * FLIGHT_PER_PX), style };
+    from: { x: THROW.x, y: THROW.y }, to: { x: landing.x, y: landing.y }, t: 0, airLift: 0,
+    // a lob hangs in the air longer, a roll is flung low and fast
+    flight: Math.max(FLIGHT_MIN, dist(THROW, landing) * FLIGHT_PER_PX) * (1.5 - 0.6 * loft),
+    style: loft, spin, curve: spin * CURVE_MAX, arc: arcHeight(loft) };
   bodies.push(b);
   phase = 'sim';
   aim = null;
@@ -99,16 +120,20 @@ function throwTo(landing, style, team) {
   syncHud();
 }
 
-// When a boule finishes its flight, it lands and (unless a pure lob) runs forward — plus a gravel kick,
-// so it never lands exactly where aimed.
+// When a boule finishes its flight, it lands and (unless a pure lob) runs forward — plus a gravel kick
+// and any spin "hook", so it never lands exactly where aimed. `justLanded` cues the renderer's dust puff.
 function land(b) {
   b.state = 'ground';
   b.x = b.to.x; b.y = b.to.y;
+  b.airLift = 0; b.justLanded = true;
   const ang = Math.atan2(b.to.y - b.from.y, b.to.x - b.from.x);
   const runSpeed = b.style * ROLL_MAX;
+  // spin bites the gravel: the run hooks to the side, and a strong spin/lob checks (shortens) the roll
+  const spinBias = (b.spin || 0) * 0.5;
+  const grab = 1 - 0.28 * Math.abs(b.spin || 0);
   // terrain kick: random angle jitter + speed variance, scaled by roughness (bigger for flatter throws)
-  const kickAng = ang + (Math.random() - 0.5) * 0.5 * ROUGH * (1.2 - b.style);
-  const kickSpd = runSpeed * (1 + (Math.random() - 0.5) * 0.4 * ROUGH) + (Math.random() * 22 * ROUGH);
+  const kickAng = ang + spinBias + (Math.random() - 0.5) * 0.5 * ROUGH * (1.2 - b.style);
+  const kickSpd = runSpeed * grab * (1 + (Math.random() - 0.5) * 0.4 * ROUGH) + (Math.random() * 22 * ROUGH);
   b.vx = Math.cos(kickAng) * kickSpd;
   b.vy = Math.sin(kickAng) * kickSpd;
 }
@@ -121,6 +146,13 @@ function step(dt) {
     if (b.state === 'air') {
       moving = true;
       b.t += dt * 1000;
+      // travel the parabola across the piste, bowing sideways with spin, so the flight is actually SEEN
+      const k = Math.min(1, b.t / b.flight), s = Math.sin(k * Math.PI);
+      const dx = b.to.x - b.from.x, dy = b.to.y - b.from.y, len = Math.hypot(dx, dy) || 1;
+      const px = -dy / len, py = dx / len;
+      b.x = b.from.x + dx * k + px * b.curve * s;
+      b.y = b.from.y + dy * k + py * b.curve * s;
+      b.airLift = s * b.arc;
       if (b.t >= b.flight) land(b);
       continue;
     }
@@ -199,13 +231,14 @@ function maybeAI() {
     if (phase !== 'aim' || current !== 1) return;
     // If YOU hold the point with a boule hugging the jack, sometimes shoot it; otherwise point at the jack.
     const yours = live().filter((b) => b.team === 0).sort((a, b) => dist(a, jack) - dist(b, jack))[0];
-    let target, style;
+    let target, loft, spin;
     if (yours && holdingTeam() === 0 && dist(yours, jack) < 34 && Math.random() < 0.5) {
-      target = { x: yours.x, y: yours.y }; style = 0.9;               // shoot
+      target = { x: yours.x, y: yours.y }; loft = 0.85; spin = 0;             // shoot: flat and hard
     } else {
-      const s = 30; target = { x: jack.x + (Math.random() - 0.5) * s, y: jack.y + (Math.random() - 0.5) * s }; style = 0.3 + Math.random() * 0.2; // point
+      const s = 30; target = { x: jack.x + (Math.random() - 0.5) * s, y: jack.y + (Math.random() - 0.5) * s };
+      loft = 0.3 + Math.random() * 0.25; spin = (Math.random() - 0.5) * 0.5;  // point: gentle arc, a little hook
     }
-    throwTo(reachable(target), style, 1);
+    throwTo(reachable(target), loft, spin, 1);
   }, 900);
 }
 
@@ -227,7 +260,9 @@ function aimFrom(pos) {
   const power = clamp((Math.hypot(dx, dy) - DRAG_MIN) / (DRAG_MAX - DRAG_MIN), 0, 1);
   const d = DIST_MIN + power * (DIST_MAX - DIST_MIN);
   const landing = reachable({ x: THROW.x + Math.cos(heading) * d, y: THROW.y + Math.sin(heading) * d });
-  return { heading, power, dist: d, landing };
+  const loft = loftFor(shotType), spin = shotSpin;
+  // arc = the 3D trajectory the overlay draws so you can see the shot before you let go
+  return { heading, power, dist: d, landing, loft, spin, shot: shotType, arc: flightArc(THROW, landing, loft, spin) };
 }
 
 let aiming = false;
@@ -241,14 +276,13 @@ function releaseThrow() {
   if (!aiming) return;
   aiming = false;
   const a = aim; aim = null;
-  if (a && humanTurn() && a.power > 0.02) throwTo(a.landing, el('style').value / 100, current); // too soft = cancel
+  if (a && humanTurn() && a.power > 0.02) throwTo(a.landing, a.loft, a.spin, current); // too soft = cancel
 }
 cv.addEventListener('pointerup', releaseThrow);
 cv.addEventListener('pointercancel', () => { aiming = false; aim = null; });
 
 // --- loop -----------------------------------------------------------------------------------------
 // Physics still runs in 2D plan coords; the WebGL renderer draws that state in 3D each frame.
-const LIFT = 70; // world-unit height of the aerial arc (scaled by loft)
 let last = 0, acc = 0, simTime = 0;
 function frame(ts) {
   const now = ts / 1000; if (!last) last = now; let d = now - last; last = now;
@@ -263,8 +297,7 @@ function frame(ts) {
       phase = 'settling';
     }
   }
-  // hand the renderer the aerial height of each in-flight boule
-  for (const b of bodies) b.airLift = b.state === 'air' ? Math.sin((b.t / b.flight) * Math.PI) * LIFT * (0.5 + b.style) : 0;
+  // b.airLift is set by the physics step during flight; the renderer reads it for the 3D arc.
   renderer.frame({ jack, bodies, aim, aiming, humanTurn, phase }, d);
   requestAnimationFrame(frame);
 }
@@ -287,6 +320,14 @@ el('mode').addEventListener('click', () => {
   el('score-opp').parentElement.childNodes[el('score-opp').parentElement.childNodes.length - 1].textContent = mode === 'ai' ? ' Comp' : ' Red';
   newMatch();
 });
+// shot-type segmented control (Lob / Roll / Spin) + the spin dial
+el('shot').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-shot]'); if (!b) return;
+  shotType = b.dataset.shot;
+  [...el('shot').children].forEach((c) => c.classList.toggle('on', c === b));
+});
+el('spin').addEventListener('input', () => { shotSpin = +el('spin').value / 100; });
+
 el('measure').addEventListener('click', () => { if (phase === 'aim') measure(); });
 el('newgame').addEventListener('click', () => newMatch());
 

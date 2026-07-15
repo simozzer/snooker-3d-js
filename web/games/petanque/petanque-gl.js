@@ -37,6 +37,27 @@ const M = {
   model(tx, ty, tz, s) {  // translate + uniform scale
     return new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, tx, ty, tz, 1]);
   },
+  identity() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); },
+  // rotation about an arbitrary (world) axis, column-major
+  axisAngle(ax, ay, az, ang) {
+    const l = Math.hypot(ax, ay, az) || 1; const x = ax / l, y = ay / l, z = az / l;
+    const c = Math.cos(ang), s = Math.sin(ang), t = 1 - c;
+    return new Float32Array([
+      c + x * x * t, y * x * t + z * s, z * x * t - y * s, 0,
+      x * y * t - z * s, c + y * y * t, z * y * t + x * s, 0,
+      x * z * t + y * s, y * z * t - x * s, c + z * z * t, 0,
+      0, 0, 0, 1,
+    ]);
+  },
+  // translate * rotation * uniform-scale — lets a mesh spin in place as it rolls/tumbles
+  composed(tx, ty, tz, s, rot) {
+    return new Float32Array([
+      rot[0] * s, rot[1] * s, rot[2] * s, 0,
+      rot[4] * s, rot[5] * s, rot[6] * s, 0,
+      rot[8] * s, rot[9] * s, rot[10] * s, 0,
+      tx, ty, tz, 1,
+    ]);
+  },
   invert(m) {
     const a = m, o = new Float32Array(16);
     const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3], a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
@@ -112,6 +133,32 @@ function smokeTex() {
   g.fillStyle = grd; g.fillRect(0, 0, 64, 64); return c;
 }
 
+// A machined-steel boule skin, tinted to the team. Latitude grooves (constant-v lines on the sphere) and
+// a maker's stamp give the surface features to READ as it rolls and tumbles — a bare colour never would.
+function bouleTex(base) {
+  const n = parseInt(base.slice(1), 16), br = n >> 16 & 255, bg = n >> 8 & 255, bb = n & 255;
+  const mix = (r, g, b, t) => `rgb(${Math.round(br + (r - br) * t)},${Math.round(bg + (g - bg) * t)},${Math.round(bb + (b - bb) * t)})`;
+  const c = cvs(256, 256), g = c.getContext('2d');
+  // vertical gradient = soft top-lit sheen baked into the metal
+  const grd = g.createLinearGradient(0, 0, 0, 256);
+  grd.addColorStop(0, mix(255, 255, 255, 0.55)); grd.addColorStop(0.42, mix(255, 255, 255, 0.12));
+  grd.addColorStop(0.6, base); grd.addColorStop(1, mix(0, 0, 0, 0.55));
+  g.fillStyle = grd; g.fillRect(0, 0, 256, 256);
+  // machined latitude grooves — a dark cut with a bright lip above it
+  for (let y = 12; y < 256; y += 18) {
+    g.strokeStyle = 'rgba(0,0,0,0.32)'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, y); g.lineTo(256, y); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.16)'; g.lineWidth = 1; g.beginPath(); g.moveTo(0, y - 2); g.lineTo(256, y - 2); g.stroke();
+  }
+  // fine steel speckle
+  for (let i = 0; i < 1400; i++) { const x = Math.random() * 256, y = Math.random() * 256;
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)';
+    g.fillRect(x, y, 1.5, 1.5); }
+  // a maker's stamp near one pole — an asymmetric mark so tumble is unmistakable
+  g.fillStyle = 'rgba(0,0,0,0.4)'; g.beginPath(); g.ellipse(150, 70, 20, 12, 0, 0, 7); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,0.28)'; g.lineWidth = 2; g.beginPath(); g.ellipse(150, 70, 20, 12, 0, 0, 7); g.stroke();
+  return c;
+}
+
 // A distant backdrop: soft plane-trees + a low stone wall, transparent above so the sky shows through.
 function backdropTex() {
   const c = cvs(1024, 256), g = c.getContext('2d');
@@ -169,6 +216,19 @@ function lowryFrame(opts) {
   // a dab of colour on some — scarf
   if (prop && Math.random < 0) {/* noop, keep deterministic */}
   return c;
+}
+
+// Advance a body's baked-in orientation so the textured sphere visibly rolls on the ground (angle =
+// distance / radius) and tumbles forward through the air. The roll axis is horizontal, square to travel.
+function advanceSpin(b, dt) {
+  if (!b._orient) b._orient = M.identity();
+  let tx = 0, tz = 0, ang = 0;
+  if (b.state === 'air') { tx = b.to.x - b.from.x; tz = b.to.y - b.from.y; ang = dt * 7.5; }
+  else { const sp = Math.hypot(b.vx || 0, b.vy || 0); if (sp > 1.2) { tx = b.vx; tz = b.vy; ang = sp * dt / (b.r || 12); } }
+  if (ang) {
+    const axis = V.norm(V.cross([0, 1, 0], [tx, 0, tz]));
+    b._orient = M.mul(M.axisAngle(axis[0], axis[1], axis[2], ang), b._orient);
+  }
 }
 
 // ---- the renderer ----------------------------------------------------------------------------------
@@ -251,8 +311,14 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
   // textures
   const T = {
     gravel: tex(gl, gravelTex()), shadow: tex(gl, softDisc('30,24,14')), smoke: tex(gl, smokeTex()),
-    backdrop: tex(gl, backdropTex()),
+    backdrop: tex(gl, backdropTex()), glow: tex(gl, softDisc('255,255,255')),
+    dust: tex(gl, softDisc('176,150,104')),
+    boule: [tex(gl, bouleTex(TEAM[0].fill[1])), tex(gl, bouleTex(TEAM[1].fill[1]))],
+    jack: tex(gl, bouleTex('#d8b45a')),
   };
+
+  // transient particles: flight trails behind airborne boules, and landing-dust puffs
+  const trails = [], groundDust = [];
 
   // ---- the crowd -----------------------------------------------------------------------------------
   const ACTIONS = ['smoke', 'drink', 'eat', 'chat'];
@@ -372,22 +438,48 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
     drawBillboard(T.backdrop, [0, 96, -H * 1.15], [W * 3.0, 240], { up: [0, 1, 0], right: [1, 0, 0], alpha: 1 });
     gl.depthMask(true);
 
-    // shadows (flat discs on the gravel), then spheres
+    // ---- boules: shadows, flight trails + landing dust, then the lit rolling spheres ----
     const balls = [state.jack, ...state.bodies];
-    gl.depthMask(false);
+
+    // spawn transient particles from the live physics state
+    for (const b of state.bodies) {
+      if (b.dead) continue;
+      if (b.state === 'air') trails.push({ x: b.x, y: b.y, lift: b.airLift || 0, team: b.team, life: 0, max: 0.5 });
+      if (b.justLanded) { b.justLanded = false;
+        for (let i = 0; i < 7; i++) groundDust.push({ x: b.x + (Math.random() - 0.5) * 14, y: b.y + (Math.random() - 0.5) * 14,
+          life: 0, max: 0.55 + Math.random() * 0.35, r0: 7 + Math.random() * 6 }); }
+    }
+
+    // ground shadows — grow and fade as the boule climbs, so height reads
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
     for (const b of balls) {
       if (b.dead) continue;
       const lift = b === state.jack ? 0 : (b.airLift || 0);
-      const sc = (b.r * 2.3) * (1 + lift / 120), a = b.dead ? 0.1 : Math.max(0.12, 0.4 - lift / 400);
-      drawBillboard(T.shadow, toWorld(b.x, b.y, 0.6), [sc, sc], { up: [0, 0, 1], right: [1, 0, 0], alpha: a, tint: [1, 1, 1] });
+      const sc = (b.r * 2.3) * (1 + lift / 90), a = Math.max(0.1, 0.42 - lift / 360);
+      drawBillboard(T.shadow, toWorld(b.x, b.y, 0.6), [sc, sc], { up: [0, 0, 1], right: [1, 0, 0], alpha: a });
     }
-    gl.depthMask(true);
-    gl.disable(gl.BLEND);
+    // flight trails — additive team-tinted glow strung along the arc
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    for (let i = trails.length - 1; i >= 0; i--) { const p = trails[i]; p.life += dt; if (p.life > p.max) { trails.splice(i, 1); continue; }
+      const k = p.life / p.max, a = (1 - k) * 0.5, sz = 10 * (1 - k * 0.4);
+      drawBillboard(T.glow, toWorld(p.x, p.y, (p.lift || 0) + 8), [sz, sz], { up: camUp, right, alpha: a, tint: hex(TEAM[p.team].fill[0]) });
+    }
+    // landing dust — a brown puff kicked off the gravel that rises and spreads
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    for (let i = groundDust.length - 1; i >= 0; i--) { const p = groundDust[i]; p.life += dt; if (p.life > p.max) { groundDust.splice(i, 1); continue; }
+      const k = p.life / p.max, sz = p.r0 + k * 26, a = (1 - k) * 0.5;
+      drawBillboard(T.dust, toWorld(p.x, p.y, 4 + k * 20), [sz, sz], { up: camUp, right, alpha: a });
+    }
+    gl.depthMask(true); gl.disable(gl.BLEND);
+
+    // the boules — textured steel, spinning as they roll and tumble
     for (const b of balls) {
       const lift = b === state.jack ? 0 : (b.airLift || 0);
-      const col = b === state.jack ? [0.86, 0.74, 0.42] : hex(TEAM[b.team].fill[1]);
-      const spec = b === state.jack ? 0.15 : 0.9, amb = b === state.jack ? 0.55 : 0.32;
-      drawMesh(SP.va, SP.n, M.model(...toWorld(b.x, b.y, b.r + lift), b.r), { color: col, spec, amb, alpha: b.dead ? 0.3 : 1 });
+      advanceSpin(b, dt);
+      const texId = b === state.jack ? T.jack : T.boule[b.team];
+      const spec = b === state.jack ? 0.3 : 0.85, amb = b === state.jack ? 0.5 : 0.34;
+      drawMesh(SP.va, SP.n, M.composed(...toWorld(b.x, b.y, b.r + lift), b.r, b._orient),
+        { useTex: 1, texId, spec, amb, alpha: b.dead ? 0.3 : 1 });
     }
 
     // crowd + smoke (alpha, back-to-front; depth test on so boules can occlude)
@@ -421,17 +513,45 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
     if (!(state.aim && state.aiming && state.humanTurn())) return;
     const a = state.aim, L = a.landing;
     const ts = worldToScreen(THROW.x, THROW.y, 0, r), ls = worldToScreen(L.x, L.y, 0, r);
-    octx.strokeStyle = 'rgba(84,201,138,.9)'; octx.setLineDash([6, 7]); octx.lineWidth = 2;
-    octx.beginPath(); octx.moveTo(ts.x, ts.y); octx.lineTo(ls.x, ls.y); octx.stroke(); octx.setLineDash([]);
-    const spread = Math.min(46, a.dist * (0.05 + 0.045) + 8) * (ls.w ? 260 / ls.w : 1);
+
+    // trajectory preview: a faint ground track + the bright aerial arc, both projected from 3D
+    if (a.arc && a.arc.length) {
+      octx.lineJoin = 'round'; octx.lineCap = 'round';
+      octx.strokeStyle = 'rgba(84,201,138,.26)'; octx.setLineDash([5, 6]); octx.lineWidth = 1.5;
+      octx.beginPath();
+      a.arc.forEach((p, i) => { const s = worldToScreen(p.x, p.y, 0, r); i ? octx.lineTo(s.x, s.y) : octx.moveTo(s.x, s.y); });
+      octx.stroke(); octx.setLineDash([]);
+      octx.beginPath();
+      a.arc.forEach((p, i) => { const s = worldToScreen(p.x, p.y, p.lift, r); i ? octx.lineTo(s.x, s.y) : octx.moveTo(s.x, s.y); });
+      octx.strokeStyle = 'rgba(120,225,160,.95)'; octx.lineWidth = 3; octx.stroke();
+      octx.strokeStyle = 'rgba(255,255,255,.5)'; octx.lineWidth = 1; octx.stroke();
+    }
+
+    // landing spot + how much the throw can stray
+    const spread = Math.min(46, a.dist * 0.095 + 8) * (ls.w ? 260 / ls.w : 1);
     octx.strokeStyle = 'rgba(84,201,138,.4)'; octx.lineWidth = 1.5;
     octx.beginPath(); octx.ellipse(ls.x, ls.y, spread, spread * 0.5, 0, 0, 7); octx.stroke();
-    octx.beginPath(); octx.arc(ls.x, ls.y, 3, 0, 7); octx.fillStyle = '#54c98a'; octx.fill();
+    octx.beginPath(); octx.arc(ls.x, ls.y, 3.5, 0, 7); octx.fillStyle = '#54c98a'; octx.fill();
+
+    // power ring with graduated ticks
     const pw = a.power, col = pw < 0.5 ? '#54c98a' : pw < 0.82 ? '#ffd45b' : '#e8663f';
-    octx.strokeStyle = 'rgba(255,255,255,.18)'; octx.lineWidth = 4;
-    octx.beginPath(); octx.arc(ts.x, ts.y, 26, 0, 7); octx.stroke();
-    octx.strokeStyle = col; octx.lineCap = 'round';
-    octx.beginPath(); octx.arc(ts.x, ts.y, 26, -Math.PI / 2, -Math.PI / 2 + pw * 6.28); octx.stroke(); octx.lineCap = 'butt';
+    octx.strokeStyle = 'rgba(255,255,255,.16)'; octx.lineWidth = 5;
+    octx.beginPath(); octx.arc(ts.x, ts.y, 28, 0, 7); octx.stroke();
+    for (let i = 0; i <= 10; i++) { const ang = -Math.PI / 2 + i / 10 * 6.28, r0 = 24, r1 = i % 5 === 0 ? 34 : 31;
+      octx.strokeStyle = 'rgba(255,255,255,.3)'; octx.lineWidth = 1;
+      octx.beginPath(); octx.moveTo(ts.x + Math.cos(ang) * r0, ts.y + Math.sin(ang) * r0); octx.lineTo(ts.x + Math.cos(ang) * r1, ts.y + Math.sin(ang) * r1); octx.stroke(); }
+    octx.strokeStyle = col; octx.lineWidth = 5; octx.lineCap = 'round';
+    octx.beginPath(); octx.arc(ts.x, ts.y, 28, -Math.PI / 2, -Math.PI / 2 + pw * 6.28); octx.stroke(); octx.lineCap = 'butt';
+
+    // numeric power, plus shot type + line angle (° left/right of straight up the piste)
+    let rel = a.heading + Math.PI / 2; while (rel > Math.PI) rel -= 6.28; while (rel < -Math.PI) rel += 6.28;
+    const deg = Math.round(rel * 180 / Math.PI);
+    const angTxt = deg === 0 ? '0°' : `${Math.abs(deg)}° ${deg > 0 ? 'R' : 'L'}`;
+    octx.textAlign = 'center';
+    octx.font = '700 16px system-ui, sans-serif'; octx.fillStyle = '#eaf6ef';
+    octx.fillText(`${Math.round(pw * 100)}%`, ts.x, ts.y - 40);
+    octx.font = '600 12px system-ui, sans-serif'; octx.fillStyle = '#9fe6c0';
+    octx.fillText(`${(a.shot || '').toUpperCase()} · ${angTxt}`, ts.x, ts.y - 58);
   }
 
   function hex(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }

@@ -38,7 +38,6 @@ const AIM_SPREAD_ANG = 0.045, AIM_SPREAD_DIST = 0.05; // ± line / ± distance a
 const LIFT_BASE = 96;                 // world-unit apex height reference (scaled up for lobs, flattened for rolls)
 const CURVE_MAX = 130;                // px of sideways bow in the flight path at full spin
 const arcHeight = (loft) => LIFT_BASE * (1.25 - loft);   // lob → tall arc, roll → skimming
-const loftFor = (type) => (type === 'lob' ? 0.14 : type === 'roll' ? 0.9 : 0.5); // 'spin' rides a mid arc
 
 // Sample the flight path (plan coords + aerial height) so the aim overlay and the physics agree on the shape.
 function flightArc(from, to, loft, spin, n = 26) {
@@ -59,7 +58,10 @@ const renderer = createPetanqueRenderer(cv, overlay, { W, H, P, THROW, R, JACK_R
 
 // --- state ------------------------------------------------------------------------------------------
 let jack, bodies, boulesLeft, scores, current, mode, phase, aim, aiTimer, settleTimer;
-let shotType = 'lob', shotSpin = 0;  // the shot chosen in the setup panel, read at release
+// The spin ball's contact point (like snooker english): side −1..+1 = hook L/R; vert −1..+1 = lob..roll.
+let strike = { side: 0, vert: 0 };
+const loftFromVert = (v) => clamp(0.5 + v * 0.42, 0.08, 0.95); // draw(down)=lob, follow(up)=roll
+const shotName = (v) => (v > 0.34 ? 'Roll' : v < -0.34 ? 'Lob' : 'Pitch');
 // phase: 'aim' (human to throw) | 'sim' (physics running) | 'measure' | 'over'
 
 function newMatch() {
@@ -260,9 +262,9 @@ function aimFrom(pos) {
   const power = clamp((Math.hypot(dx, dy) - DRAG_MIN) / (DRAG_MAX - DRAG_MIN), 0, 1);
   const d = DIST_MIN + power * (DIST_MAX - DIST_MIN);
   const landing = reachable({ x: THROW.x + Math.cos(heading) * d, y: THROW.y + Math.sin(heading) * d });
-  const loft = loftFor(shotType), spin = shotSpin;
+  const loft = loftFromVert(strike.vert), spin = strike.side;
   // arc = the 3D trajectory the overlay draws so you can see the shot before you let go
-  return { heading, power, dist: d, landing, loft, spin, shot: shotType, arc: flightArc(THROW, landing, loft, spin) };
+  return { heading, power, dist: d, landing, loft, spin, shot: shotName(strike.vert), arc: flightArc(THROW, landing, loft, spin) };
 }
 
 let aiming = false;
@@ -320,13 +322,41 @@ el('mode').addEventListener('click', () => {
   el('score-opp').parentElement.childNodes[el('score-opp').parentElement.childNodes.length - 1].textContent = mode === 'ai' ? ' Comp' : ' Red';
   newMatch();
 });
-// shot-type segmented control (Lob / Roll / Spin) + the spin dial
-el('shot').addEventListener('click', (ev) => {
-  const b = ev.target.closest('[data-shot]'); if (!b) return;
-  shotType = b.dataset.shot;
-  [...el('shot').children].forEach((c) => c.classList.toggle('on', c === b));
-});
-el('spin').addEventListener('input', () => { shotSpin = +el('spin').value / 100; });
+// --- spin ball (snooker-style english) ------------------------------------------------------------
+// One steel ball you set the contact point on: up = roll on (follow), down = lob / drop dead (draw),
+// out to the side = hook the flight. It feeds `strike`, which aimFrom turns into loft + spin.
+const sb = el('spinball'), sbx = sb.getContext('2d');
+const SBW = sb.width, SBC = SBW / 2, SBR = SBW / 2 - 7;
+function drawSpinBall() {
+  sbx.clearRect(0, 0, SBW, SBW);
+  const g = sbx.createRadialGradient(SBC - SBR * 0.36, SBC - SBR * 0.42, SBR * 0.15, SBC, SBC, SBR);
+  g.addColorStop(0, '#eef2f6'); g.addColorStop(0.5, '#9fb0bf'); g.addColorStop(1, '#485664');
+  sbx.fillStyle = g; sbx.beginPath(); sbx.arc(SBC, SBC, SBR, 0, 7); sbx.fill();
+  sbx.strokeStyle = 'rgba(0,0,0,.4)'; sbx.lineWidth = 1; sbx.stroke();
+  sbx.strokeStyle = 'rgba(18,28,38,.26)'; // crosshair
+  sbx.beginPath(); sbx.moveTo(SBC - SBR, SBC); sbx.lineTo(SBC + SBR, SBC); sbx.moveTo(SBC, SBC - SBR); sbx.lineTo(SBC, SBC + SBR); sbx.stroke();
+  sbx.fillStyle = 'rgba(15,25,35,.5)'; sbx.font = '700 8px system-ui, sans-serif'; sbx.textAlign = 'center';
+  sbx.fillText('ROLL', SBC, SBC - SBR + 9); sbx.fillText('LOB', SBC, SBC + SBR - 3);
+  const dx = SBC + strike.side * SBR, dy = SBC - strike.vert * SBR; // contact dot
+  sbx.fillStyle = '#e8663f'; sbx.beginPath(); sbx.arc(dx, dy, 5, 0, 7); sbx.fill();
+  sbx.strokeStyle = 'rgba(255,255,255,.85)'; sbx.lineWidth = 1.5; sbx.stroke();
+}
+function syncShot() {
+  el('shot-name').textContent = shotName(strike.vert);
+  el('shot-sub').textContent = Math.abs(strike.side) < 0.12 ? 'straight' : `hook ${strike.side > 0 ? 'R' : 'L'} ${Math.abs(strike.side).toFixed(2)}`;
+}
+function sbFrom(ev) {
+  const r = sb.getBoundingClientRect();
+  let sx = ((ev.clientX - r.left) * (SBW / r.width) - SBC) / SBR;
+  let sy = -((ev.clientY - r.top) * (SBW / r.height) - SBC) / SBR;
+  const m = Math.hypot(sx, sy); if (m > 1) { sx /= m; sy /= m; } // clamp the contact point to the ball's edge
+  strike = { side: sx, vert: sy };
+  drawSpinBall(); syncShot();
+}
+sb.addEventListener('pointerdown', (ev) => { try { sb.setPointerCapture(ev.pointerId); } catch { /* ignore */ } sbFrom(ev); });
+sb.addEventListener('pointermove', (ev) => { if (ev.buttons) sbFrom(ev); });
+sb.addEventListener('dblclick', () => { strike = { side: 0, vert: 0 }; drawSpinBall(); syncShot(); });
+drawSpinBall(); syncShot();
 
 el('measure').addEventListener('click', () => { if (phase === 'aim') measure(); });
 el('newgame').addEventListener('click', () => newMatch());

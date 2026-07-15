@@ -36,14 +36,12 @@
     button.toggle.active { background: #ffd45b; color: #23331b; }
     button:hover { filter: brightness(1.08); }
 
-    /* shot-setup panel: segmented Lob/Roll/Spin + a spin dial */
-    .shot { display: flex; gap: 10px; align-items: center; background: #1b2229; border: 1px solid #2a333d; border-radius: 10px; padding: 5px 8px; }
-    .seg { display: inline-flex; background: #12181e; border: 1px solid #2a333d; border-radius: 8px; overflow: hidden; }
-    .seg button { background: transparent; color: #9fb4c7; padding: 6px 12px; border-radius: 0; font-weight: 700; }
-    .seg button:hover { filter: none; color: #cfe0ee; background: #232c35; }
-    .seg button.on { background: #54c98a; color: #10201a; }
-    label.spin { gap: 5px; color: #7f95a8; font-size: 13px; }
-    label.spin input { width: 104px; accent-color: #ffd45b; }
+    /* shot-setup panel: a snooker-style spin ball — drag the dot for roll/lob + hook */
+    .shot { display: flex; gap: 9px; align-items: center; background: #1b2229; border: 1px solid #2a333d; border-radius: 10px; padding: 4px 9px 4px 5px; }
+    #spinball { width: 44px; height: 44px; touch-action: none; cursor: pointer; }
+    .shotread { display: flex; flex-direction: column; line-height: 1.15; }
+    .shotread b { color: #eaf6ef; font-size: 13px; }
+    .shotread span { color: #7f95a8; font-size: 11px; }
 
     #wrap { position: relative; width: min(94vw, 900px); aspect-ratio: 900 / 560; }
     #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: 12px; }
@@ -65,13 +63,9 @@
   <div class="hud">
     <div class="stat">You <b id="score-you">0</b><span class="dotrow" id="dots-you"></span></div>
     <div class="stat"><span class="dotrow" id="dots-opp"></span><b id="score-opp">0</b> Comp</div>
-    <div class="shot">
-      <div class="seg" id="shot">
-        <button data-shot="lob" class="on" title="High soft arc — drops onto the spot, barely runs">Lob</button>
-        <button data-shot="roll" title="Low flat throw — skims in and runs along the gravel">Roll</button>
-        <button data-shot="spin" title="Curved flight that hooks and grabs on landing">Spin</button>
-      </div>
-      <label class="slider spin" title="Bow the flight left or right — strongest on a Spin shot">◀<input id="spin" type="range" min="-100" max="100" value="0">▶</label>
+    <div class="shot" title="Drag the dot on the boule: up = roll on, down = lob / drop, sides = hook the flight. Double-click to centre.">
+      <canvas id="spinball" width="72" height="72"></canvas>
+      <div class="shotread"><b id="shot-name">Pitch</b><span id="shot-sub">straight</span></div>
     </div>
     <button id="mode" class="toggle">vs Computer</button>
     <button id="measure" class="sec">Measure</button>
@@ -81,7 +75,7 @@
   <div id="wrap"><canvas id="piste"></canvas><canvas id="aim"></canvas></div>
   <div id="status"></div>
 
-  <footer><b>Pick your shot</b> first — <b>Lob</b> (high, soft, dies where it lands), <b>Roll</b> (low and running), or <b>Spin</b> (curves in the air and hooks on landing); the <b>◀ ▶</b> dial bends the flight left or right. Then <b>drag out from the throwing circle</b> to throw: the way you drag is your line, and how far you drag is the power — the ring shows angle and power, and a dotted arc previews the flight. It's force, not a target, so aiming straight at the jack and yanking hard sails long past it. Closest boule to the jack wins the end; first to 13 wins. A boule off the piste is dead.</footer>
+  <footer><b>Set your spin</b> first on the little steel ball, snooker-style — drag the dot <b>up to roll on</b>, <b>down to lob and drop dead</b>, or <b>out to the side to hook</b> the flight left/right (double-click to centre). Then <b>drag out from the throwing circle</b> to throw: the way you drag is your line, and how far you drag is the power — the ring shows angle and power, and a dotted arc previews the flight. It's force, not a target, so aiming straight at the jack and yanking hard sails long past it. Closest boule to the jack wins the end; first to 13 wins. A boule off the piste is dead.</footer>
 
   <script type="module" src="./petanque.js"></script>
 </body>

@@ -6,7 +6,7 @@
 // It is deliberately OPTIONAL and secret-free by default: with no KC_ROSTER_* env the roster is
 // disabled and the relay behaves exactly as before (mirrors auth.js). The client secret lives only in
 // this server process's environment — never in the browser bundle, never on the CDN. Only a first name
-// plus two reversed surname letters (falling back to username) ever leave this module — never a
+// plus the surname's first and last letter (falling back to username) ever leave this module — never a
 // full surname; the OIDC `sub` is kept internal for correlation.
 //
 // Resilience: the user list is cached and refreshed on a TTL. A transient Keycloak blip serves the
@@ -14,16 +14,17 @@
 
 const FIVE_MIN = 5 * 60 * 1000;
 
-// Community display name: the first name plus the first two letters of the surname, REVERSED and
-// re-capitalised (e.g. "Moscrop" → "Mo" → "Om", so "Simon Om"). Enough to tell members apart on the
-// Community page while obscuring the real surname further. Falls back to the username when there's no
+// Community display name: the first name plus the first and last letters of the surname with the
+// middle hidden (e.g. "Moscrop" → "M·p", so "Simon M·p"). Distinguishes Cook from Cooper on the
+// Community page while never printing the full surname. Falls back to the username when there's no
 // first name. Exported so the client can format identically (see lobby.js).
 export function communityName(first, last, username) {
   const f = (first && String(first).trim()) || '';
   const l = (last && String(last).trim()) || '';
   if (f && l) {
-    const rev = l.slice(0, 2).split('').reverse().join('').toLowerCase();
-    const tag = rev.charAt(0).toUpperCase() + rev.slice(1); // "om" → "Om"
+    const tag = l.length > 1
+      ? `${l[0].toUpperCase()}·${l[l.length - 1].toLowerCase()}` // "Moscrop" → "M·p"
+      : l[0].toUpperCase();                                          // single-letter surname → just it
     return `${f} ${tag}`;
   }
   return f || (username && String(username).trim()) || null;
@@ -87,7 +88,7 @@ export function createRoster({
     const res = await fetchImpl(url, { headers: { authorization: `Bearer ${at}` } });
     if (!res.ok) throw new Error(`${group ? 'members' : 'users'} ${res.status}`);
     const arr = await res.json();
-    // First name + two reversed surname letters (fall back to username); skip disabled accounts.
+    // First name + the surname's first and last letter (fall back to username); skip disabled accounts.
     return (Array.isArray(arr) ? arr : [])
       .filter((u) => u && u.enabled !== false && (u.firstName || u.username))
       .map((u) => ({ sub: u.id, name: communityName(u.firstName, u.lastName, u.username), username: u.username || null }));

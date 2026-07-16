@@ -38,18 +38,19 @@ test('disabled without full config — returns [] and never calls out', async ()
   assert.equal(called, false);
 });
 
-test('lists first name + two reversed surname letters (fallback to username), skips disabled accounts', async () => {
+test('lists first name + surname first/last letter (fallback to username), skips disabled accounts', async () => {
   const { fetchImpl } = mockKeycloak([
-    { id: 'a', firstName: 'Simon', lastName: 'Moscrop', username: 'simon' }, // "Mo" → "Om" → "Simon Om"
-    { id: 'b', firstName: '  Marie ', lastName: ' Curie ', username: 'marie99' }, // trimmed "Cu" → "Uc" → "Marie Uc"
+    { id: 'a', firstName: 'Simon', lastName: 'Moscrop', username: 'simon' }, // "Moscrop" → "M·p" → "Simon M·p"
+    { id: 'b', firstName: '  Marie ', lastName: ' Curie ', username: 'marie99' }, // trimmed "Curie" → "C·e" → "Marie C·e"
     { id: 'c', firstName: 'Prince', username: 'prince' },       // no surname → first name only
     { id: 'e', firstName: '', username: 'pierre' },             // no first name → falls back to username
+    { id: 'f', firstName: 'Bjork', lastName: 'O', username: 'bjork' }, // single-letter surname → "Bjork O"
     { id: 'd', firstName: 'Ghost', lastName: 'Ly', username: 'ghost', enabled: false }, // skipped
   ]);
   const r = createRoster({ ...CFG, fetchImpl });
   const list = await r.list();
-  assert.deepEqual(list.map((u) => u.name), ['Simon Om', 'Marie Uc', 'Prince', 'pierre']);
-  assert.deepEqual(list.map((u) => u.sub), ['a', 'b', 'c', 'e'], 'keeps sub internally for correlation');
+  assert.deepEqual(list.map((u) => u.name), ['Simon M·p', 'Marie C·e', 'Prince', 'pierre', 'Bjork O']);
+  assert.deepEqual(list.map((u) => u.sub), ['a', 'b', 'c', 'e', 'f'], 'keeps sub internally for correlation');
 });
 
 test('caches within TTL, refreshes after it', async () => {

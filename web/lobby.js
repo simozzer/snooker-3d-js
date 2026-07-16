@@ -29,15 +29,15 @@ const GAME_META = {
 const meta = (key) => GAME_META[key] || { icon: '🎮', label: key };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// Community display name: first name + the first two surname letters REVERSED and re-capitalised
-// (e.g. "Moscrop" → "Om", so "Simon Om"). Mirrors server/roster.js exactly so our own row still
+// Community display name: first name + the surname's first and last letter, middle hidden
+// (e.g. "Moscrop" → "M·p", so "Simon M·p"). Mirrors server/roster.js exactly so our own row still
 // highlights; falls back to the full name/username.
 const communityName = (first, last, fallback) => {
   const f = (first && first.trim()) || '';
   const l = (last && last.trim()) || '';
   if (f && l) {
-    const rev = l.slice(0, 2).split('').reverse().join('').toLowerCase();
-    return `${f} ${rev.charAt(0).toUpperCase() + rev.slice(1)}`;
+    const tag = l.length > 1 ? `${l[0].toUpperCase()}·${l[l.length - 1].toLowerCase()}` : l[0].toUpperCase();
+    return `${f} ${tag}`;
   }
   return f || (fallback && String(fallback).trim()) || null;
 };

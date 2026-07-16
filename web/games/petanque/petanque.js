@@ -15,7 +15,7 @@ const el = (id) => document.getElementById(id);
 const W = 900, H = 560;   // logical "plan" play-field (independent of the WebGL canvas pixel size)
 
 // --- geometry + tuning ------------------------------------------------------------------------------
-const R = 13, JACK_R = 7;                 // boule / jack radii
+const R = 13, JACK_R = 5;                 // boule / jack radii (≈74mm boule, ≈30mm jack at the piste's cm scale)
 const THROW = { x: W / 2, y: H - 52 };    // the throwing circle (bottom centre)
 const P = { x0: 30, y0: 28, x1: W - 30, y1: H - 20 };   // playable piste rectangle
 const FRICTION = 680;                     // px/s^2 rolling deceleration — high, for gravel (short roll)
@@ -455,7 +455,7 @@ function land(b) {
   b.vx = Math.cos(kickAng) * kickSpd;
   b.vy = Math.sin(kickAng) * kickSpd;
   sfx.thud();
-  if (Math.random() < 0.5) referee.announce(); // the French ref pipes up on about half the landings
+  // (the referee announces once per turn at settle — see the loop — so it never rides on a collision)
 }
 
 // --- physics --------------------------------------------------------------------------------------
@@ -514,10 +514,11 @@ function step(dt) {
   return moving;
 }
 
-// Boules must never come to rest overlapping. A tight pack can freeze mid-overlap (separating A↔B shoves
-// B into C just as speeds die), so at the moment everything settles we relax all overlaps to just-touching:
-// a few iterations of symmetric pairwise circle separation, re-clamped inside the piste each pass. Includes
-// the jack. This converges to a valid packing (many boules can touch, none overlap).
+// Boules must never come to rest overlapping — nor even touching so tightly they read as one blob. At the
+// moment everything settles we relax all pairs until each has a hair of daylight (REST_GAP) between it and
+// its neighbours: a few iterations of symmetric pairwise circle separation, re-clamped inside the piste each
+// pass, jack included. Converges to a valid packing (many boules can sit close, none overlap or fuse).
+const REST_GAP = 1.4; // plan px of clear air left between resting boules (~0.4cm) so they never look merged
 function deClump() {
   const items = [jack, ...bodies].filter((b) => !b.dead);
   for (let iter = 0; iter < 20; iter++) {
@@ -525,7 +526,7 @@ function deClump() {
     for (let i = 0; i < items.length; i++) {
       for (let j = i + 1; j < items.length; j++) {
         const a = items[i], c = items[j];
-        const dx = c.x - a.x, dy = c.y - a.y, min = a.r + c.r;
+        const dx = c.x - a.x, dy = c.y - a.y, min = a.r + c.r + REST_GAP;
         let d = Math.hypot(dx, dy);
         if (d < min - 0.01) {
           let nx, ny;
@@ -706,6 +707,7 @@ function frame(ts) {
         b.state = 'rest'; b.vx = b.vy = 0;
       });
       deClump(); // never leave boules frozen on top of one another
+      if (Math.random() < 0.5) referee.announce(); // once per turn, at settle — never tied to a collision
       simTime = 0; acc = 0;
       phase = 'settling';
       clearTimeout(settleTimer);

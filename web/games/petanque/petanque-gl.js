@@ -6,6 +6,11 @@
 // World mapping: plan (x,y) → 3D (X = x - W/2, Y = up, Z = y - H/2). Ground is the plane Y=0. The camera
 // sits behind the near edge (the throwing circle) and looks across the piste toward the jack and the crowd.
 
+// Plan-pixels → centimetres for the on-piste distance readouts. Anchored to real kit: a boule is ~74mm
+// across and is drawn 26px across (2·R, R=13), so 7.4cm / 26px ≈ 0.285 cm/px. This keeps boule, jack and
+// distance numbers all in the same, realistic scale (a boule reads ~7cm, a jack ~3cm, near boules ~10–40cm).
+const CM_PER_PX = 0.285;
+
 // ---- tiny mat4 / vec3 (column-major, WebGL order) --------------------------------------------------
 const V = {
   sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
@@ -606,7 +611,7 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
       octx.beginPath(); octx.moveTo(js.x, js.y); octx.lineTo(bs.x, bs.y); octx.stroke(); octx.setLineDash([]);
       octx.globalAlpha = pulse; octx.lineWidth = 2.5;
       octx.beginPath(); octx.arc(bs.x, bs.y, 13, 0, 7); octx.stroke(); octx.globalAlpha = 1;
-      const cm = Math.round(Math.hypot(b.x - state.jack.x, b.y - state.jack.y) * 1.6); // plan px → ~cm
+      const cm = Math.round(Math.hypot(b.x - state.jack.x, b.y - state.jack.y) * CM_PER_PX); // plan px → cm
       const mx = (js.x + bs.x) / 2, my = (js.y + bs.y) / 2;
       octx.font = '700 12px system-ui, sans-serif';
       octx.fillStyle = 'rgba(0,0,0,.5)'; octx.fillText(`${cm} cm`, mx + 1, my - 5);
@@ -638,7 +643,7 @@ export function createPetanqueRenderer(glCanvas, overlay, opts) {
       // distance label, pushed outward past the boule (away from the jack) so the two don't collide
       const dx = bs.x - js.x, dy = bs.y - js.y, dl = Math.hypot(dx, dy) || 1;
       const lx = bs.x + dx / dl * 26, ly = bs.y + dy / dl * 26;
-      const label = `${(p.d * 1.6).toFixed(1)} cm`; // plan px → ~cm, one decimal to split near-ties
+      const label = `${(p.d * CM_PER_PX).toFixed(1)} cm`; // plan px → cm, one decimal to split near-ties
       octx.font = i === 0 ? '800 15px system-ui, sans-serif' : '700 13px system-ui, sans-serif';
       octx.fillStyle = 'rgba(0,0,0,.6)'; octx.fillText(label, lx + 1, ly + 1);
       octx.fillStyle = i === 0 ? '#ffe07a' : '#fff'; octx.fillText(label, lx, ly);

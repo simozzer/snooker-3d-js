@@ -57,6 +57,14 @@ export function createDice() {
   let finalRound = false;
   let finalTurnsLeft = 0;            // final turns still to be played before the game concludes
   let finalTrigger = null;          // the seat that reached the target first (holds ties: got there first)
+  // Continuation ("use the banked score"): when a player banks, their banked total and the dice they had
+  // left are OFFERED to the next player, who may CONTINUE from them instead of a fresh six. They start
+  // holding that score but must roll-and-score to lock it in (busting loses it); clearing all the dice
+  // (hot dice) means they owe another MIN_BANK before they can bank again.
+  let pendingOffer = null;          // { bank, diceLeft } for the NEXT player, or null
+  let continued = false;            // this turn was started by taking that offer
+  let hotFloor = false;             // a hot-dice reset happened this continued turn → owe MIN_BANK more
+  let postHot = 0;                  // points added since that reset (counts toward the floor)
 
   function freshDice() {
     dice = Array.from({ length: NUM_DICE }, () => ({ value: 0, held: false, picked: false }));
@@ -67,6 +75,24 @@ export function createDice() {
     turnScore = 0;
     farkled = false;
     phase = 'await-roll';
+    continued = false;
+    hotFloor = false;
+    postHot = 0;
+  }
+
+  // Take the previous player's offer: start this turn holding their banked total, with only the dice they
+  // left in play still live (the rest are parked as "already used"). The player still has to throw and set
+  // aside a scoring die before they can bank — you can't just pocket what you inherited.
+  function continueTurn() {
+    if (phase !== 'await-roll' || !pendingOffer) return false;
+    const { bank: carried, diceLeft } = pendingOffer;
+    pendingOffer = null;
+    freshDice();
+    turnScore = carried;
+    continued = true; hotFloor = false; postHot = 0;
+    const used = Math.max(0, NUM_DICE - diceLeft);
+    for (let i = 0; i < used; i++) { dice[i].value = 5; dice[i].held = true; } // parked "used" markers
+    return true;
   }
 
   // Faces of the dice still in play (not set aside) — the pool the current roll scores against.
@@ -98,8 +124,11 @@ export function createDice() {
   // "hot dice" clear it's all six again; otherwise just the dice not yet set aside.
   function roll(values) {
     if (phase === 'over') return { farkle: false };
-    // Hot dice: everything was set aside last roll — clear the board and roll a fresh six.
-    if (dice.every((d) => d.held)) freshDice();
+    // Rolling a fresh six at the start of a turn declines any carried offer (the "Roll fresh" choice).
+    if (phase === 'await-roll') pendingOffer = null;
+    // Hot dice: everything was set aside last roll — clear the board and roll a fresh six. During a
+    // continued turn, going hot means you owe another MIN_BANK on the fresh dice before you can bank.
+    if (dice.every((d) => d.held)) { freshDice(); if (continued) { hotFloor = true; postHot = 0; } }
     let vi = 0;
     for (const d of dice) {
       if (d.held) continue;
@@ -125,13 +154,20 @@ export function createDice() {
   }
 
   function canBank() {
-    return canRoll() && turnScore + selectionScore() >= MIN_BANK;
+    if (!canRoll()) return false;
+    if (turnScore + selectionScore() < MIN_BANK) return false;
+    // "Use all the dice and you must score at least MIN_BANK after that": once a continued turn goes hot,
+    // the points made on the fresh dice must clear the floor before it can be banked.
+    if (continued && hotFloor && postHot + selectionScore() < MIN_BANK) return false;
+    return true;
   }
 
   // Set aside the current selection, then roll on. Returns { farkle }.
   function rollAgain(values) {
     if (!canRoll()) return { farkle: false };
-    turnScore += selectionScore();
+    const add = selectionScore();
+    turnScore += add;
+    if (hotFloor) postHot += add;
     for (const d of dice) if (d.picked) { d.held = true; d.picked = false; }
     return roll(values);
   }
@@ -170,6 +206,8 @@ export function createDice() {
     const p = players[current];
     p.score += turnScore;
     p.strikes = 0;
+    // Offer this banked total + the dice left in play to the next player (the continuation).
+    pendingOffer = { bank: turnScore, diceLeft: dice.filter((d) => !d.held).length || NUM_DICE };
     // First to reach the target starts the final round; everyone else gets one last turn to beat it.
     if (!finalRound && p.score >= TARGET) {
       finalRound = true;
@@ -178,7 +216,7 @@ export function createDice() {
       advance();
       return { banked: true, won: false, finalRound: true, target: current };
     }
-    if (tickFinalRound()) return { banked: true, won: winner === current, over: true };
+    if (tickFinalRound()) { pendingOffer = null; return { banked: true, won: winner === current, over: true }; }
     advance();
     return { banked: true, won: false };
   }
@@ -189,6 +227,7 @@ export function createDice() {
     const p = players[current];
     p.strikes = (p.strikes || 0) + 1;
     if (p.strikes >= 3) { p.score = Math.max(0, p.score - STRIKE_PENALTY); p.strikes = 0; }
+    pendingOffer = null; // a bust leaves nothing to continue
     if (tickFinalRound()) return { player: current, over: true };
     advance();
     return { player: current };
@@ -200,6 +239,7 @@ export function createDice() {
       current = 0;
       winner = null;
       finalRound = false; finalTurnsLeft = 0; finalTrigger = null;
+      pendingOffer = null;
       startTurn();
     },
     roll,
@@ -207,6 +247,9 @@ export function createDice() {
     toggleSelect,
     bank,
     endFarkle,
+    continueTurn,
+    // The offer (banked total + leftover dice) the CURRENT player may continue from, or null.
+    offer: () => (pendingOffer ? { ...pendingOffer } : null),
     eligible,
     selectionScore,
     canRoll,
@@ -227,6 +270,10 @@ export function createDice() {
         finalRound,
         finalTurnsLeft,
         finalTrigger,
+        offer: pendingOffer ? { ...pendingOffer } : null,
+        continued,
+        hotFloor,
+        postHot,
         minBank: MIN_BANK,
         target: TARGET,
       };
@@ -245,6 +292,10 @@ export function createDice() {
       finalRound = snap.finalRound;
       finalTurnsLeft = snap.finalTurnsLeft || 0;
       finalTrigger = snap.finalTrigger ?? null;
+      pendingOffer = snap.offer ? { ...snap.offer } : null;
+      continued = !!snap.continued;
+      hotFloor = !!snap.hotFloor;
+      postHot = snap.postHot || 0;
     },
   };
 }

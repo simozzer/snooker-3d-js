@@ -157,9 +157,12 @@ export default function mount(ctx) {
   // ---- controls -----------------------------------------------------------------------------
   gameControls.innerHTML = '';
   const rollBtn = document.createElement('button'); rollBtn.textContent = '🎲 Roll';
+  // Shown only at the start of a turn the previous player passed a bank into: take it over vs. roll fresh.
+  const contBtn = document.createElement('button'); contBtn.textContent = '♻️ Continue'; contBtn.className = 'sec'; contBtn.style.display = 'none';
   const bankBtn = document.createElement('button'); bankBtn.textContent = '💰 Bank'; bankBtn.className = 'sec';
-  gameControls.append(rollBtn, bankBtn);
+  gameControls.append(rollBtn, contBtn, bankBtn);
   rollBtn.addEventListener('click', onRoll);
+  contBtn.addEventListener('click', onContinue);
   bankBtn.addEventListener('click', onBank);
 
   // ---- HUD overlay (scoreboard + turn total + prompt) ---------------------------------------
@@ -190,7 +193,11 @@ export default function mount(ctx) {
     else if (aiMsg) line = aiMsg; // the computer's bank-or-roll deliberation (shown during its pause)
     else if (busy && mode === 'ai' && s.current === 1) line = `Computer (${AI_STYLE[difficulty].split(' — ')[0]}) rolling…`;
     else if (s.farkled) line = 'Bust! No score — turn lost.';
-    else if (s.phase === 'await-roll') line = s.finalRound
+    else if (s.phase === 'await-roll' && engine.offer()) {
+      const off = engine.offer();
+      const prev = s.players[(s.current + s.players.length - 1) % s.players.length].name;
+      line = `${prev} banked ${off.bank} · ${off.diceLeft} dice left — ♻️ Continue it or 🎲 Roll fresh`;
+    } else if (s.phase === 'await-roll') line = s.finalRound
       ? `🏁 Final turn — beat ${beatOf(s)} to win · roll`
       : `First to ${TARGET} · roll to start your turn`;
     else if (sel > 0) {
@@ -297,7 +304,12 @@ export default function mount(ctx) {
   // Which engine dice indices get thrown next (see dice.js commit semantics).
   function thrownIndices() {
     const s = engine.state();
-    if (s.phase === 'await-roll') return [0, 1, 2, 3, 4, 5];
+    if (s.phase === 'await-roll') {
+      // A fresh turn throws all six; a CONTINUED turn throws only the leftover (non-parked) dice.
+      const live = [];
+      for (let i = 0; i < 6; i++) if (!s.dice[i].held) live.push(i);
+      return live.length ? live : [0, 1, 2, 3, 4, 5];
+    }
     const live = [];
     for (let i = 0; i < 6; i++) if (!s.dice[i].held && !s.dice[i].picked) live.push(i);
     return live.length ? live : [0, 1, 2, 3, 4, 5]; // empty ⇒ hot dice (fresh six)
@@ -486,6 +498,17 @@ export default function mount(ctx) {
     resolveTurnEnd();
   }
 
+  // Take over the previous player's banked score + leftover dice, then throw those dice to build on it.
+  function onContinue() {
+    if (busy || over) return;
+    const s = engine.state();
+    if (s.phase !== 'await-roll' || !engine.offer()) return;
+    if (isOnline() && (!ctx.net.isReady() || !myTurn())) return;
+    engine.continueTurn();
+    placeDice(); renderHud(); syncButtons();
+    onRoll(); // the roll itself (and its relay, online) carries the continued state to the peer
+  }
+
   function afterTurnChange() {
     busy = false;
     placeDice(); syncButtons(); renderHud(); announceTurn();
@@ -581,7 +604,19 @@ export default function mount(ctx) {
     const s = engine.state();
     if (s.phase === 'over' || s.current !== 1) return;
     busy = true; syncButtons(); renderHud();
-    setTimeout(aiRoll, 550);
+    setTimeout(aiTurnStart, 550);
+  }
+
+  // At the top of its turn the computer decides whether to take over a passed bank (continue) or roll a
+  // fresh six. It continues a worthwhile bank when the leftover dice aren't too likely to bust.
+  function aiTurnStart() {
+    const off = engine.offer();
+    if (off && off.bank >= MIN_BANK && (off.diceLeft >= 3 || off.bank >= 1000)) {
+      engine.continueTurn();
+      aiMsg = `Computer continues the bank (${off.bank})`;
+      placeDice(); renderHud();
+      setTimeout(aiRoll, 800);
+    } else { aiMsg = null; aiRoll(); }
   }
 
   function aiRoll() {
@@ -675,7 +710,13 @@ export default function mount(ctx) {
     rollBtn.disabled = lock || s.phase === 'over' || s.farkled
       || (s.phase === 'pick' && !engine.canRoll());
     bankBtn.disabled = lock || !engine.canBank();
-    rollBtn.textContent = s.phase === 'await-roll' ? '🎲 Roll' : '🎲 Roll on';
+    // Continuation offer: at the start of a turn the previous player passed a bank into, offer to take it.
+    const off = engine.offer();
+    const showContinue = !!off && s.phase === 'await-roll';
+    contBtn.style.display = showContinue ? '' : 'none';
+    contBtn.disabled = lock;
+    if (showContinue) contBtn.textContent = `♻️ Continue ${off.bank}`;
+    rollBtn.textContent = s.phase !== 'await-roll' ? '🎲 Roll on' : showContinue ? '🎲 Roll fresh' : '🎲 Roll';
     // Show what the bank is worth: banking commits the current selection, so it's worth the points
     // already set aside this turn PLUS whatever is selected right now. Below the minimum, show how
     // close you are so the "get on the board" threshold isn't a mystery.
@@ -766,6 +807,7 @@ export default function mount(ctx) {
         <li>Press <b>Roll</b> to throw the dice into the tray, then <b>tap the glowing (scoring) dice</b> to set them aside.</li>
         <li><b>Roll on</b> with the dice that are left to build your turn total — or <b>Bank</b> to keep it.</li>
         <li>You need <b>${MIN_BANK}+</b> in a turn before you're allowed to bank.</li>
+        <li>When the previous player banks, you may <b>♻️ Continue</b> their score — start holding it, with only the dice they left in play. You must roll and set aside a scorer to lock it in; <b>bust and you lose the lot</b>. Or <b>Roll fresh</b> for a normal turn. (Clear all the dice and you owe another ${MIN_BANK}.)</li>
         <li>Set all six aside and you earn <b>hot dice</b> — throw a fresh six and keep going.</li>
         <li>Roll and score <b>nothing</b> and you <b>bust</b>: the whole turn's points are lost.</li>
       </ul>

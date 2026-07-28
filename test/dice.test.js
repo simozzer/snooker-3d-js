@@ -125,6 +125,60 @@ test('three farkles in a row costs 1000 points and resets the strike count', () 
   assert.equal(g.state().players[0].strikes, 0, 'strikes reset after the penalty');
 });
 
+// --- continuation ("use the banked score") ----------------------------------------------------
+test('continuation: the next player can take over the previous bank and its leftover dice', () => {
+  const g = createDice();
+  g.newGame(['A', 'B']);
+  g.roll([1, 1, 1, 2, 3, 4]);                 // three 1s = 1000
+  g.toggleSelect(0); g.toggleSelect(1); g.toggleSelect(2);
+  g.bank();                                   // A banks 1000 with three dice left in play
+  assert.equal(g.state().players[0].score, 1000);
+  assert.equal(g.state().current, 1);
+  assert.deepEqual(g.offer(), { bank: 1000, diceLeft: 3 }, 'the bank + leftover dice are offered on');
+
+  assert.equal(g.continueTurn(), true);
+  assert.equal(g.state().turnScore, 1000, 'B starts holding the carried bank');
+  assert.equal(g.offer(), null, 'the offer is consumed');
+  assert.equal(g.state().dice.filter((d) => d.held).length, 3, 'the used dice are parked, three live');
+  assert.equal(g.canBank(), false, 'but B must roll and score before it can be banked');
+
+  g.roll([5, 2, 3]);                          // B throws the three live dice; a 5 keeps it alive
+  const fiveIdx = g.state().dice.findIndex((d) => !d.held && d.value === 5);
+  g.toggleSelect(fiveIdx);
+  assert.equal(g.canBank(), true);
+  g.bank();
+  assert.equal(g.state().players[1].score, 1050, 'B banks the carried 1000 + the 50 they added');
+  assert.equal(g.state().players[0].score, 1000, 'A keeps their own bank');
+});
+
+test('continuation: busting the continued turn loses the carried bank', () => {
+  const g = createDice();
+  g.newGame(['A', 'B']);
+  g.roll([1, 1, 1, 2, 3, 4]);
+  g.toggleSelect(0); g.toggleSelect(1); g.toggleSelect(2);
+  g.bank();
+  g.continueTurn();
+  const r = g.roll([2, 3, 4]);                // nothing scores → bust
+  assert.equal(r.farkle, true);
+  assert.equal(g.state().turnScore, 0, 'the carried bank is lost');
+  g.endFarkle();
+  assert.equal(g.state().players[1].score, 0, 'B scored nothing');
+  assert.equal(g.state().players[0].score, 1000, 'A still keeps their bank');
+  assert.equal(g.offer(), null, 'a bust leaves no offer to continue');
+});
+
+test('continuation: rolling a fresh six declines the offer', () => {
+  const g = createDice();
+  g.newGame(['A', 'B']);
+  g.roll([1, 1, 1, 2, 3, 4]);
+  g.toggleSelect(0); g.toggleSelect(1); g.toggleSelect(2);
+  g.bank();
+  assert.ok(g.offer(), 'an offer is waiting');
+  g.roll([5, 5, 2, 3, 4, 6]);                 // B rolls a fresh six instead
+  assert.equal(g.offer(), null, 'the offer is gone once a fresh turn begins');
+  assert.equal(g.state().turnScore, 0, 'B starts from zero, not the carried bank');
+});
+
 // --- final round ("last licks") ---------------------------------------------------------------
 // Bank a whole turn from one scoring roll (select every eligible die, then bank) — used to march a
 // player toward the target in the tests below.
